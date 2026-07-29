@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, Calendar, Gauge, PieChart as PieChartIcon,
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
-  Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, TrendingUp
+  Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 
@@ -19,7 +19,7 @@ const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
 const ONE_SHIFT = 140000; // A조 / C조 단가
-const TWO_SHIFT = 280000; // A/C조 (2근) 단가
+const TWO_SHIFT = 280000; // 풀조 단가
 const DEFAULT_HOURLY = 12000;
 const DEFAULT_DAILY = 130000;
 
@@ -48,11 +48,10 @@ const TAX_MODES = {
   none: { label: "비과세/미공제", rate: 0 },
 };
 
-// 조 구분: 풀조 -> A/C조 로 변경
 const SHIFT_INFO = {
   A: { label: "A조", short: "A조", color: GOLD },
   C: { label: "C조", short: "C조", color: INDIGO },
-  full: { label: "A/C조", short: "A/C조", color: INCOME },
+  full: { label: "풀조", short: "풀조", color: INK },
 };
 
 const STORE_PRESETS = [
@@ -84,6 +83,8 @@ function storeColor(name) {
 }
 function labelColorOf(name) { return (LABELS.find((l) => l.key === name) || {}).color || MUTED; }
 
+// A조=오전 슬롯, C조=오후 슬롯, 풀조=오전+오후 슬롯을 모두 점유한다고 보고
+// 같은 슬롯이 두 번 이상 채워지면 "시간대 중복 출근"으로 판단한다.
 function computeConflict(entries) {
   const work = (entries || []).filter((e) => e.shift);
   let morning = 0, afternoon = 0;
@@ -98,76 +99,51 @@ function computeConflict(entries) {
 const DEFAULT_SETTINGS = {
   goal: DEFAULT_GOAL,
   recurring: [],
-  workType: "fixed",
-  taxMode: "3.3",
+  workType: "fixed", // fixed | hourly | daily
+  taxMode: "3.3", // 3.3 | 4dae | none
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
   hourlyRate: DEFAULT_HOURLY,
   dailyRate: DEFAULT_DAILY,
 };
 
-// ---------- storage helpers ----------
+// ---------- storage helpers (Claude Artifacts persistent storage) ----------
+// Browser localStorage/sessionStorage/IndexedDB are not available inside
+// Claude artifacts, so the built-in window.storage API is used instead. It
+// survives page reloads / browser restarts the same way IndexedDB would,
+// and autosaves silently in the background (no file download) on every entry.
 async function loadMonth(y, m) {
   try {
-    if (window.storage && window.storage.get) {
-      const res = await window.storage.get(monthKey(y, m), false);
-      if (res && res.value) return JSON.parse(res.value);
-    } else {
-      const res = localStorage.getItem(monthKey(y, m));
-      if (res) return JSON.parse(res);
-    }
-  } catch (e) { /* empty */ }
+    const res = await window.storage.get(monthKey(y, m), false);
+    if (res && res.value) return JSON.parse(res.value);
+  } catch (e) { /* not found -> empty month */ }
   return { days: {} };
 }
 async function saveMonth(y, m, data) {
-  try {
-    if (window.storage && window.storage.set) {
-      await window.storage.set(monthKey(y, m), JSON.stringify(data), false);
-    } else {
-      localStorage.setItem(monthKey(y, m), JSON.stringify(data));
-    }
-  } catch (e) { console.error("save failed", e); }
+  try { await window.storage.set(monthKey(y, m), JSON.stringify(data), false); }
+  catch (e) { console.error("save failed", e); }
 }
 async function loadSettings() {
   try {
-    if (window.storage && window.storage.get) {
-      const res = await window.storage.get("settings", false);
-      if (res && res.value) {
-        const parsed = JSON.parse(res.value);
-        return { ...DEFAULT_SETTINGS, ...parsed, fixedRates: { ...DEFAULT_SETTINGS.fixedRates, ...(parsed.fixedRates || {}) } };
-      }
-    } else {
-      const res = localStorage.getItem("settings");
-      if (res) return { ...DEFAULT_SETTINGS, ...JSON.parse(res) };
+    const res = await window.storage.get("settings", false);
+    if (res && res.value) {
+      const parsed = JSON.parse(res.value);
+      return { ...DEFAULT_SETTINGS, ...parsed, fixedRates: { ...DEFAULT_SETTINGS.fixedRates, ...(parsed.fixedRates || {}) } };
     }
-  } catch (e) { /* default */ }
+  } catch (e) { /* none yet */ }
   return { ...DEFAULT_SETTINGS };
 }
 async function saveSettings(s) {
-  try {
-    if (window.storage && window.storage.set) {
-      await window.storage.set("settings", JSON.stringify(s), false);
-    } else {
-      localStorage.setItem("settings", JSON.stringify(s));
-    }
-  } catch (e) { console.error("settings save failed", e); }
+  try { await window.storage.set("settings", JSON.stringify(s), false); }
+  catch (e) { console.error("settings save failed", e); }
 }
 async function listAllMonths() {
   const out = {};
   try {
-    if (window.storage && window.storage.list) {
-      const res = await window.storage.list("month:", false);
-      const keys = (res && res.keys) || [];
-      await Promise.all(keys.map(async (k) => {
-        try { const r = await window.storage.get(k, false); if (r && r.value) out[k] = JSON.parse(r.value); } catch (e) { }
-      }));
-    } else {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith("month:")) {
-          out[k] = JSON.parse(localStorage.getItem(k));
-        }
-      }
-    }
+    const res = await window.storage.list("month:", false);
+    const keys = (res && res.keys) || [];
+    await Promise.all(keys.map(async (k) => {
+      try { const r = await window.storage.get(k, false); if (r && r.value) out[k] = JSON.parse(r.value); } catch (e) { /* skip */ }
+    }));
   } catch (e) { console.error("list failed", e); }
   return out;
 }
@@ -180,7 +156,7 @@ function downloadText(filename, mime, content) {
   URL.revokeObjectURL(url);
 }
 
-// ---------- recurring engine ----------
+// ---------- recurring (고정비/고정수입) engine ----------
 function applyRecurringToMonth(year, month, monthData, recurringList, realToday) {
   if (!recurringList || !recurringList.length) return { data: monthData, changed: false };
   const dim = daysInMonth(year, month);
@@ -207,7 +183,8 @@ function applyRecurringToMonth(year, month, monthData, recurringList, realToday)
   return { data: changed ? { ...monthData, days } : monthData, changed };
 }
 
-// ---------- wallpaper calendar image ----------
+// ---------- wallpaper calendar image (canvas, no external lib needed) ----------
+// Mirrors the enlarged, 2-line, amount-free calendar layout used on screen.
 function generateCalendarPNG(year, month, daysData) {
   const width = 1080, height = 2220;
   const canvas = document.createElement("canvas");
@@ -355,7 +332,7 @@ function SegButton({ active, onClick, children }) {
   );
 }
 
-// ---------- root App ----------
+// ---------- root ----------
 export default function App() {
   const realToday = new Date();
   const [year, setYear] = useState(realToday.getFullYear());
@@ -391,7 +368,7 @@ export default function App() {
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
-  useEffect(() => { if ((tab === "report" || tab === "analysis") && !loading) for (let m = 0; m < 12; m++) ensureMonth(year, m); }, [tab, year, ensureMonth, loading]);
+  useEffect(() => { if (tab === "report" && !loading) for (let m = 0; m < 12; m++) ensureMonth(year, m); }, [tab, year, ensureMonth, loading]);
 
   const curData = cache[mk(year, month)] || { days: {} };
 
@@ -416,7 +393,6 @@ export default function App() {
   const deleteEntry = (dayNum, id) => mutateDay(dayNum, (d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }));
   const updateDayMeta = (dayNum, meta) => mutateDay(dayNum, (d) => ({ ...d, ...meta }));
 
-  // 근무 횟수(근) 정확한 계산 (A/C조는 하루 2근으로 계산하여 22일 출근 -> 24근 도출)
   const monthTotals = useMemo(() => {
     let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
     const workDaySet = new Set();
@@ -432,31 +408,17 @@ export default function App() {
         byCat[e.category] = (byCat[e.category] || 0) + e.amount;
       }
     }));
-    // 총 근무 횟수 (A/C조는 2근)
-    const totalShiftsCount = countA + countC + (countFull * 2);
-    return {
-      gross, expense, asset, byCat, net: gross * (1 - taxRate),
-      workStats: { countA, countC, countFull, workDays: workDaySet.size, totalShifts: totalShiftsCount }
-    };
+    return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size } };
   }, [curData, taxRate]);
 
   const yearTotals = useMemo(() => {
     let gross = 0;
-    const monthlyList = [];
     for (let m = 0; m < 12; m++) {
-      let mGross = 0;
       const d = cache[mk(year, m)];
-      if (d) {
-        Object.values(d.days).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") mGross += e.amount; }));
-      }
-      gross += mGross;
-      monthlyList.push({ month: `${m + 1}월`, gross: mGross, net: mGross * (1 - taxRate) });
+      if (!d) continue;
+      Object.values(d.days).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
     }
-    const nonZeroMonths = monthlyList.filter(m => m.gross > 0);
-    const avgGross = nonZeroMonths.length ? Math.round(gross / nonZeroMonths.length) : 0;
-    const avgNet = Math.round(avgGross * (1 - taxRate));
-
-    return { gross, net: gross * (1 - taxRate), tax: gross * taxRate, monthlyList, avgGross, avgNet };
+    return { gross, net: gross * (1 - taxRate), tax: gross * taxRate };
   }, [cache, year, taxRate]);
 
   const isCurrentMonth = year === realToday.getFullYear() && month === realToday.getMonth();
@@ -510,11 +472,7 @@ export default function App() {
           for (const [key, val] of Object.entries(parsed.months)) {
             const ym = key.replace("month:", "");
             const [yy, mm] = ym.split("-").map((x) => parseInt(x, 10));
-            if (window.storage && window.storage.set) {
-              await window.storage.set(key, JSON.stringify(val), false);
-            } else {
-              localStorage.setItem(key, JSON.stringify(val));
-            }
+            await window.storage.set(key, JSON.stringify(val), false);
             newCache[`${yy}-${pad2(mm)}`] = val;
           }
           cacheRef.current = newCache;
@@ -588,7 +546,7 @@ export default function App() {
                 taxMode={settings.taxMode}
               />
             )}
-            {tab === "analysis" && <AnalysisView year={year} monthTotals={monthTotals} yearTotals={yearTotals} />}
+            {tab === "analysis" && <AnalysisView monthTotals={monthTotals} />}
           </>
         )}
 
@@ -634,37 +592,21 @@ export default function App() {
   );
 }
 
-// ---------- install banner ----------
+// ---------- install banner (home-screen shortcut hint) ----------
 function InstallBanner() {
   const [visible, setVisible] = useState(false);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     (async () => {
       let dismissed = false;
-      try {
-        if (window.storage && window.storage.get) {
-          const res = await window.storage.get("installBannerDismissed", false);
-          dismissed = !!(res && res.value === "1");
-        } else {
-          dismissed = localStorage.getItem("installBannerDismissed") === "1";
-        }
-      } catch (e) { }
+      try { const res = await window.storage.get("installBannerDismissed", false); dismissed = !!(res && res.value === "1"); } catch (e) { /* not set */ }
       const isStandalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
       const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       setVisible(!dismissed && !isStandalone && isMobile);
       setReady(true);
     })();
   }, []);
-  const dismiss = async () => {
-    setVisible(false);
-    try {
-      if (window.storage && window.storage.set) {
-        await window.storage.set("installBannerDismissed", "1", false);
-      } else {
-        localStorage.setItem("installBannerDismissed", "1");
-      }
-    } catch (e) { }
-  };
+  const dismiss = async () => { setVisible(false); try { await window.storage.set("installBannerDismissed", "1", false); } catch (e) { /* ignore */ } };
   if (!ready || !visible) return null;
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   return (
@@ -685,7 +627,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView ----------
+// ---------- Calendar (확대된 셀 + 금액 없는 2줄 스케줄 표기) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -724,7 +666,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
               minHeight: 92, border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
               borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
-              alignItems: "flex-start", justifyContent: "flex-start", padding: "8px 7px", position: "relative", textAlign: "left", overflow: "hidden"
+              alignItems: "flex-start", justifyContent: "flex-start", padding: "8px 7px", position: "relative", textAlign: "left",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
                 <span className="mono" style={{ fontSize: 12, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
@@ -763,7 +705,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   );
 }
 
-// ---------- DayModal ----------
+// ---------- Day entry modal ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -933,7 +875,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   );
 }
 
-// ---------- DailyBudgetCard ----------
+// ---------- Daily budget card ----------
 function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpent, realToday, year, month }) {
   if (!isCurrentMonth) {
     return (
@@ -962,7 +904,7 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-// ---------- ReportView ----------
+// ---------- Report ----------
 function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, expenseToDate, todaySpent, realToday, taxMode }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
@@ -980,17 +922,13 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
       <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={year} month={month} />
 
-      {/* 출근 현황 카드 (A조 / C조 / A/C조) */}
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>이번 달 출근 현황</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A.color} />
         <MiniStatCard label="C조" value={ws.countC} color={SHIFT_INFO.C.color} />
-        <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.full.color} />
+        <MiniStatCard label="풀조" value={ws.countFull} color={SHIFT_INFO.full.color} />
       </div>
-      {/* 22일 출근 24근 표기 반영 */}
-      <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, textAlign: "center" }}>
-        총 근무일 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 횟수 <span className="mono" style={{ fontWeight: 700, color: INDIGO }}>{ws.totalShifts}회</span>
-      </div>
+      <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 근무일 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 횟수 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.countA + ws.countC + ws.countFull}회</span></div>
 
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -1009,15 +947,11 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         </div>
         <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: INDIGO }}>{achieveRate.toFixed(0)}%</div>
         <div style={{ fontSize: 12, color: "#8A8272", marginTop: 4 }}>
-          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · A/C조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
+          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · 풀조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
         </div>
       </div>
 
-      {/* <8월 급여> 문구 반영 영역 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: INK, borderBottom: `1px solid ${PAPER_LINE}`, paddingBottom: 8, marginBottom: 10 }}>
-          &lt;{month + 1}월 급여&gt;
-        </div>
         <Row label="세전 총수당" value={monthTotals.gross} color={INCOME} />
         <Row label={`${taxInfo.label} 공제`} value={-(monthTotals.gross * taxInfo.rate)} color={EXPENSE} />
         <Row label="세후 실수령액" value={monthTotals.net} color={INK} bold big />
@@ -1030,7 +964,7 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>
           세금 모아보기
-          <InfoTip text="매 수당에서 자동 공제되는 세액을 모아 보여드려요. 5월 종합소득세 신고 시 환급 또는 추가납부를 참고하는 용도예요." />
+          <InfoTip text="매 수당에서 자동 공제되는 세액을 모아 보여드려요. 5월 종합소득세 신고 시 환급 또는 추가납부를 참고하는 용도예요. 실제 세액은 소득공제 등에 따라 달라질 수 있어요." />
         </div>
         <Row label={`이번 달 ${taxInfo.label}`} value={monthTotals.gross * taxInfo.rate} color={EXPENSE} bold />
         <Row label={`${year}년 누적 ${taxInfo.label}`} value={yearTotals.tax} color={INK} bold big />
@@ -1053,59 +987,16 @@ function MiniStatCard({ label, value, color }) {
   );
 }
 
-// ---------- AnalysisView (분석 탭: 월별 급여 / 연평균 급여 추가) ----------
-function AnalysisView({ year, monthTotals, yearTotals }) {
+// ---------- Analysis ----------
+function AnalysisView({ monthTotals }) {
   const data = EXPENSE_CATS.filter((c) => c.key !== ASSET_CAT && monthTotals.byCat[c.key] > 0).map((c) => ({ name: c.key, value: monthTotals.byCat[c.key] || 0, color: c.color }));
   const hasData = data.length > 0;
   const netOut = monthTotals.expense, saved = monthTotals.asset, total = netOut + saved || 1;
-
   return (
     <div style={{ padding: "16px 20px 100px" }}>
-      <div className="display" style={{ fontSize: 19, fontWeight: 700, marginBottom: 16 }}>급여 및 소비 분석</div>
-
-      {/* 월별 급여 추이 및 연평균 요약 카드 */}
+      <div className="display" style={{ fontSize: 19, fontWeight: 700, marginBottom: 16 }}>소비 패턴 분석</div>
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: INK, display: "flex", alignItems: "center", gap: 6 }}>
-            <TrendingUp size={16} color={INDIGO} /> {year}년 월별 급여 추이
-          </div>
-          <span style={{ fontSize: 11, color: MUTED }}>{year}년</span>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <div style={{ flex: 1, background: PAPER, padding: "10px 12px", borderRadius: 12 }}>
-            <span style={{ fontSize: 10.5, color: MUTED, fontWeight: 700, block: "true" }}>연평균 월급여</span>
-            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: INDIGO, marginTop: 2 }}>{won(yearTotals.avgGross)}</div>
-          </div>
-          <div style={{ flex: 1, background: PAPER, padding: "10px 12px", borderRadius: 12 }}>
-            <span style={{ fontSize: 10.5, color: MUTED, fontWeight: 700, block: "true" }}>올해 총 수령액</span>
-            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: INCOME, marginTop: 2 }}>{won(yearTotals.gross)}</div>
-          </div>
-        </div>
-
-        {/* 월별 바 그래프 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {yearTotals.monthlyList.map((m) => {
-            const maxVal = Math.max(...yearTotals.monthlyList.map(x => x.gross), 4000000);
-            const pct = Math.min(100, Math.round((m.gross / maxVal) * 100));
-            return (
-              <div key={m.month} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 11, color: MUTED, width: 28, fontWeight: 600 }}>{m.month}</span>
-                <div style={{ flex: 1, height: 8, background: "#EFEADD", borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${pct}%`, background: m.gross > 0 ? INDIGO : "transparent", borderRadius: 4 }} />
-                </div>
-                <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: m.gross > 0 ? INK : MUTED, width: 80, textAlign: "right" }}>
-                  {m.gross > 0 ? won(m.gross) : "-"}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 카테고리별 지출 비중 */}
-      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>이번 달 지출 비중</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>카테고리별 지출 비중</div>
         {hasData ? (
           <div style={{ width: "100%", height: 220 }}>
             <ResponsiveContainer>
@@ -1122,7 +1013,6 @@ function AnalysisView({ year, monthTotals, yearTotals }) {
           {data.map((d) => (<div key={d.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}><span style={{ width: 8, height: 8, borderRadius: 8, background: d.color, display: "inline-block" }} />{d.name} <span className="mono">{won(d.value)}</span></div>))}
         </div>
       </div>
-
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>사라지는 돈 vs 모이는 돈</div>
         <div style={{ display: "flex", height: 14, borderRadius: 7, overflow: "hidden", marginBottom: 10 }}>
@@ -1136,7 +1026,7 @@ function AnalysisView({ year, monthTotals, yearTotals }) {
   );
 }
 
-// ---------- SettingsModal ----------
+// ---------- Settings modal ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
@@ -1178,7 +1068,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
           {settings.workType === "fixed" && (
             <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
               <RateField label="A조/C조 (1근)" value={rOne} setValue={setROne} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, one: parseInt(rOne, 10) || ONE_SHIFT } })} />
-              <RateField label="A/C조 (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
+              <RateField label="풀조 (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
             </div>
           )}
           {settings.workType === "hourly" && (
