@@ -4,7 +4,7 @@ import {
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
   Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle,
 } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 // ---------- constants ----------
 const INK = "#1C2321";
@@ -18,8 +18,8 @@ const GOLD = "#B08D57";
 const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
-const ONE_SHIFT = 140000; // A조 / C조 단가
-const TWO_SHIFT = 280000; // 풀조 단가
+const ONE_SHIFT = 140000; // 단일 조 (A1/A2/C) 단가
+const TWO_SHIFT = 280000; // 조합 조 (A1/C, A2/C) 2근 단가
 const DEFAULT_HOURLY = 12000;
 const DEFAULT_DAILY = 130000;
 
@@ -48,11 +48,23 @@ const TAX_MODES = {
   none: { label: "비과세/미공제", rate: 0 },
 };
 
+// 세분화된 근무 조: A1/A2/C는 단일 슬롯(1근), A1C/A2C는 오전+오후 연속(2근)
 const SHIFT_INFO = {
-  A: { label: "A조", short: "A조", color: GOLD },
-  C: { label: "C조", short: "C조", color: INDIGO },
-  full: { label: "풀조", short: "풀조", color: INK },
+  A1: { label: "A1조", short: "A1", color: GOLD },
+  A2: { label: "A2조", short: "A2", color: "#C77B4A" },
+  C: { label: "C조", short: "C", color: INDIGO },
+  A1C: { label: "A1/C", short: "A1/C", color: INK },
+  A2C: { label: "A2/C", short: "A2/C", color: "#6B5B4A" },
 };
+// 각 조가 점유하는 시간대 슬롯
+const SHIFT_SLOTS = {
+  A1: ["morning"],
+  A2: ["morning"],
+  C: ["afternoon"],
+  A1C: ["morning", "afternoon"],
+  A2C: ["morning", "afternoon"],
+};
+const COMBO_SHIFTS = new Set(["A1C", "A2C"]); // 2근(조합 조)
 
 const STORE_PRESETS = [
   { name: "T2 불가리팝업", color: "#B5432E" },
@@ -72,10 +84,9 @@ const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
 const firstWeekday = (y, m) => new Date(y, m, 1).getDay();
 const clampDay = (d, dim) => Math.min(Math.max(1, d), dim);
 const emptyDay = () => ({ entries: [], label: null, memo: "" });
-const truncate = (s, n) => (s && s.length > n ? s.slice(0, n) + "…" : s || "");
 
-function storeColor(name) {
-  const preset = STORE_PRESETS.find((s) => s.name === name);
+function storeColor(name, customStores = []) {
+  const preset = STORE_PRESETS.find((s) => s.name === name) || customStores.find((s) => s.name === name);
   if (preset) return preset.color;
   let hash = 0;
   for (let i = 0; i < (name || "").length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 997;
@@ -83,15 +94,11 @@ function storeColor(name) {
 }
 function labelColorOf(name) { return (LABELS.find((l) => l.key === name) || {}).color || MUTED; }
 
-// A조=오전 슬롯, C조=오후 슬롯, 풀조=오전+오후 슬롯을 모두 점유한다고 보고
-// 같은 슬롯이 두 번 이상 채워지면 "시간대 중복 출근"으로 판단한다.
 function computeConflict(entries) {
-  const work = (entries || []).filter((e) => e.shift);
+  const work = (entries || []).filter((e) => e.shift && SHIFT_SLOTS[e.shift]);
   let morning = 0, afternoon = 0;
   work.forEach((e) => {
-    if (e.shift === "A") morning++;
-    else if (e.shift === "C") afternoon++;
-    else if (e.shift === "full") { morning++; afternoon++; }
+    SHIFT_SLOTS[e.shift].forEach((slot) => { if (slot === "morning") morning++; else afternoon++; });
   });
   return morning > 1 || afternoon > 1;
 }
@@ -99,51 +106,77 @@ function computeConflict(entries) {
 const DEFAULT_SETTINGS = {
   goal: DEFAULT_GOAL,
   recurring: [],
-  workType: "fixed", // fixed | hourly | daily
-  taxMode: "3.3", // 3.3 | 4dae | none
+  workType: "fixed",
+  taxMode: "3.3",
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
   hourlyRate: DEFAULT_HOURLY,
   dailyRate: DEFAULT_DAILY,
+  customStores: [], // 사용자가 추가한 매장 프리셋 [{name, color}]
 };
 
-// ---------- storage helpers (Claude Artifacts persistent storage) ----------
-// Browser localStorage/sessionStorage/IndexedDB are not available inside
-// Claude artifacts, so the built-in window.storage API is used instead. It
-// survives page reloads / browser restarts the same way IndexedDB would,
-// and autosaves silently in the background (no file download) on every entry.
+// ---------- storage helpers ----------
 async function loadMonth(y, m) {
   try {
-    const res = await window.storage.get(monthKey(y, m), false);
-    if (res && res.value) return JSON.parse(res.value);
-  } catch (e) { /* not found -> empty month */ }
+    if (window.storage && window.storage.get) {
+      const res = await window.storage.get(monthKey(y, m), false);
+      if (res && res.value) return JSON.parse(res.value);
+    } else {
+      const res = localStorage.getItem(monthKey(y, m));
+      if (res) return JSON.parse(res);
+    }
+  } catch (e) { /* empty */ }
   return { days: {} };
 }
 async function saveMonth(y, m, data) {
-  try { await window.storage.set(monthKey(y, m), JSON.stringify(data), false); }
-  catch (e) { console.error("save failed", e); }
+  try {
+    if (window.storage && window.storage.set) {
+      await window.storage.set(monthKey(y, m), JSON.stringify(data), false);
+    } else {
+      localStorage.setItem(monthKey(y, m), JSON.stringify(data));
+    }
+  } catch (e) { console.error("save failed", e); }
 }
 async function loadSettings() {
   try {
-    const res = await window.storage.get("settings", false);
-    if (res && res.value) {
-      const parsed = JSON.parse(res.value);
-      return { ...DEFAULT_SETTINGS, ...parsed, fixedRates: { ...DEFAULT_SETTINGS.fixedRates, ...(parsed.fixedRates || {}) } };
+    if (window.storage && window.storage.get) {
+      const res = await window.storage.get("settings", false);
+      if (res && res.value) {
+        const parsed = JSON.parse(res.value);
+        return { ...DEFAULT_SETTINGS, ...parsed, fixedRates: { ...DEFAULT_SETTINGS.fixedRates, ...(parsed.fixedRates || {}) } };
+      }
+    } else {
+      const res = localStorage.getItem("settings");
+      if (res) return { ...DEFAULT_SETTINGS, ...JSON.parse(res) };
     }
-  } catch (e) { /* none yet */ }
+  } catch (e) { /* default */ }
   return { ...DEFAULT_SETTINGS };
 }
 async function saveSettings(s) {
-  try { await window.storage.set("settings", JSON.stringify(s), false); }
-  catch (e) { console.error("settings save failed", e); }
+  try {
+    if (window.storage && window.storage.set) {
+      await window.storage.set("settings", JSON.stringify(s), false);
+    } else {
+      localStorage.setItem("settings", JSON.stringify(s));
+    }
+  } catch (e) { console.error("settings save failed", e); }
 }
 async function listAllMonths() {
   const out = {};
   try {
-    const res = await window.storage.list("month:", false);
-    const keys = (res && res.keys) || [];
-    await Promise.all(keys.map(async (k) => {
-      try { const r = await window.storage.get(k, false); if (r && r.value) out[k] = JSON.parse(r.value); } catch (e) { /* skip */ }
-    }));
+    if (window.storage && window.storage.list) {
+      const res = await window.storage.list("month:", false);
+      const keys = (res && res.keys) || [];
+      await Promise.all(keys.map(async (k) => {
+        try { const r = await window.storage.get(k, false); if (r && r.value) out[k] = JSON.parse(r.value); } catch (e) { }
+      }));
+    } else {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("month:")) {
+          out[k] = JSON.parse(localStorage.getItem(k));
+        }
+      }
+    }
   } catch (e) { console.error("list failed", e); }
   return out;
 }
@@ -156,7 +189,7 @@ function downloadText(filename, mime, content) {
   URL.revokeObjectURL(url);
 }
 
-// ---------- recurring (고정비/고정수입) engine ----------
+// ---------- recurring engine ----------
 function applyRecurringToMonth(year, month, monthData, recurringList, realToday) {
   if (!recurringList || !recurringList.length) return { data: monthData, changed: false };
   const dim = daysInMonth(year, month);
@@ -183,8 +216,14 @@ function applyRecurringToMonth(year, month, monthData, recurringList, realToday)
   return { data: changed ? { ...monthData, days } : monthData, changed };
 }
 
-// ---------- wallpaper calendar image (canvas, no external lib needed) ----------
-// Mirrors the enlarged, 2-line, amount-free calendar layout used on screen.
+// ---------- wallpaper calendar PNG ----------
+function truncateToWidth(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
+  return t + "…";
+}
+
 function generateCalendarPNG(year, month, daysData) {
   const width = 1080, height = 2220;
   const canvas = document.createElement("canvas");
@@ -240,7 +279,7 @@ function generateCalendarPNG(year, month, daysData) {
     ctx.textAlign = "left";
     ctx.fillStyle = col === 0 ? EXPENSE : col === 6 ? INDIGO : INK;
     ctx.font = "700 26px sans-serif";
-    ctx.fillText(`${d} (${WEEK_LABELS[wd]})`, x + 16, y + 34);
+    ctx.fillText(`${d}`, x + 16, y + 34);
 
     if (dayObj && dayObj.label) {
       ctx.fillStyle = labelColorOf(dayObj.label);
@@ -249,6 +288,7 @@ function generateCalendarPNG(year, month, daysData) {
       ctx.fill();
     }
 
+    const maxTextW = cellW - 32;
     if (conflict) {
       ctx.fillStyle = EXPENSE;
       ctx.font = "700 20px sans-serif";
@@ -258,10 +298,11 @@ function generateCalendarPNG(year, month, daysData) {
       const first = work[0];
       ctx.fillStyle = storeColor(first.category);
       ctx.font = "600 19px sans-serif";
-      ctx.fillText(truncate(first.category, 8), x + 16, y + 68);
+      ctx.fillText(truncateToWidth(ctx, first.category, maxTextW), x + 16, y + 68);
       ctx.fillStyle = SHIFT_INFO[first.shift]?.color || INK;
       ctx.font = "700 22px sans-serif";
-      ctx.fillText(SHIFT_INFO[first.shift]?.label + (work.length > 1 ? ` 외 ${work.length - 1}` : ""), x + 16, y + 98);
+      const shiftText = SHIFT_INFO[first.shift]?.label + (work.length > 1 ? ` 외 ${work.length - 1}` : "");
+      ctx.fillText(truncateToWidth(ctx, shiftText, maxTextW), x + 16, y + 98);
     } else if (dayObj && dayObj.label) {
       ctx.fillStyle = labelColorOf(dayObj.label);
       ctx.font = "600 20px sans-serif";
@@ -269,7 +310,7 @@ function generateCalendarPNG(year, month, daysData) {
       if (dayObj.memo) {
         ctx.fillStyle = MUTED;
         ctx.font = "500 16px sans-serif";
-        ctx.fillText(truncate(dayObj.memo, 10), x + 16, y + 94);
+        ctx.fillText(truncateToWidth(ctx, dayObj.memo, maxTextW), x + 16, y + 94);
       }
     }
   }
@@ -287,10 +328,10 @@ function downloadDataUrl(filename, dataUrl) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-// ---------- small UI atoms ----------
+// ---------- UI Components ----------
 function TabButton({ active, onClick, icon: Icon, label }) {
   return (
-    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1 py-2.5" style={{ color: active ? INK : MUTED }}>
+    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1 py-2.5" style={{ color: active ? INK : MUTED, border: "none", background: "transparent" }}>
       <Icon size={20} strokeWidth={active ? 2.4 : 1.8} />
       <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: 0.2 }}>{label}</span>
     </button>
@@ -316,7 +357,7 @@ function InfoTip({ text }) {
   const [open, setOpen] = useState(false);
   return (
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center", marginLeft: 5 }}>
-      <button onClick={() => setOpen((o) => !o)} style={{ padding: 0, display: "flex" }}><Info size={13} color={MUTED} /></button>
+      <button onClick={() => setOpen((o) => !o)} style={{ padding: 0, display: "flex", background: "transparent", border: "none" }}><Info size={13} color={MUTED} /></button>
       {open && (
         <div style={{ position: "absolute", top: 20, left: 0, zIndex: 10, width: 210, background: INK, color: "#F6F3EC", fontSize: 11, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, boxShadow: "0 6px 16px rgba(0,0,0,0.25)" }}>{text}</div>
       )}
@@ -332,7 +373,7 @@ function SegButton({ active, onClick, children }) {
   );
 }
 
-// ---------- root ----------
+// ---------- root App ----------
 export default function App() {
   const realToday = new Date();
   const [year, setYear] = useState(realToday.getFullYear());
@@ -368,7 +409,28 @@ export default function App() {
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
-  useEffect(() => { if (tab === "report" && !loading) for (let m = 0; m < 12; m++) ensureMonth(year, m); }, [tab, year, ensureMonth, loading]);
+
+  const [yearScan, setYearScan] = useState({});
+  const [yearScanLoaded, setYearScanLoaded] = useState(false);
+  useEffect(() => {
+    if (tab !== "report" && tab !== "analysis") return;
+    let cancelled = false;
+    setYearScanLoaded(false);
+    (async () => {
+      const all = await listAllMonths();
+      if (cancelled) return;
+      const perMonth = {};
+      for (let m = 1; m <= 12; m++) {
+        const data = all[`month:${year}-${pad2(m)}`];
+        let gross = 0;
+        if (data) Object.values(data.days || {}).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
+        perMonth[pad2(m)] = gross;
+      }
+      setYearScan(perMonth);
+      setYearScanLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [tab, year]);
 
   const curData = cache[mk(year, month)] || { days: {} };
 
@@ -400,26 +462,34 @@ export default function App() {
     Object.entries(curData.days).forEach(([dk, d]) => (d.entries || []).forEach((e) => {
       if (e.type === "income") {
         gross += e.amount;
-        if (e.shift === "A") { countA++; workDaySet.add(dk); }
-        else if (e.shift === "C") { countC++; workDaySet.add(dk); }
-        else if (e.shift === "full") { countFull++; workDaySet.add(dk); }
+        if (e.shift && SHIFT_SLOTS[e.shift]) {
+          workDaySet.add(dk);
+          if (COMBO_SHIFTS.has(e.shift)) countFull++;
+          else if (e.shift === "C") countC++;
+          else countA++;
+        }
       } else {
         if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
         byCat[e.category] = (byCat[e.category] || 0) + e.amount;
       }
     }));
-    return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size } };
+    const totalGeun = countA + countC + countFull * 2;
+    return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size, totalGeun } };
   }, [curData, taxRate]);
 
   const yearTotals = useMemo(() => {
-    let gross = 0;
-    for (let m = 0; m < 12; m++) {
-      const d = cache[mk(year, m)];
-      if (!d) continue;
-      Object.values(d.days).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
-    }
+    const gross = Object.values(yearScan).reduce((a, b) => a + b, 0);
     return { gross, net: gross * (1 - taxRate), tax: gross * taxRate };
-  }, [cache, year, taxRate]);
+  }, [yearScan, taxRate]);
+
+  const monthlySeries = useMemo(() => {
+    const series = [];
+    for (let m = 1; m <= 12; m++) {
+      const gross = yearScan[pad2(m)] || 0;
+      series.push({ month: `${m}월`, gross, net: gross * (1 - taxRate) });
+    }
+    return series;
+  }, [yearScan, taxRate]);
 
   const isCurrentMonth = year === realToday.getFullYear() && month === realToday.getMonth();
   const expenseToDate = useMemo(() => {
@@ -453,7 +523,15 @@ export default function App() {
   const toggleRecurring = (id) => saveRecurring((settings.recurring || []).map((r) => (r.id === id ? { ...r, active: !r.active } : r)));
   const deleteRecurring = (id) => saveRecurring((settings.recurring || []).filter((r) => r.id !== id));
 
-  // ---- backup / restore / csv / wallpaper ----
+  const addStorePreset = (name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    const already = STORE_PRESETS.some((s) => s.name === trimmed) || (settings.customStores || []).some((s) => s.name === trimmed);
+    if (already) return;
+    patchSettings({ customStores: [...(settings.customStores || []), { name: trimmed, color: storeColor(trimmed) }] });
+  };
+  const deleteStorePreset = (name) => patchSettings({ customStores: (settings.customStores || []).filter((s) => s.name !== name) });
+
   const exportBackup = async () => {
     const months = await listAllMonths();
     const payload = { exportedAt: new Date().toISOString(), settings, months };
@@ -472,7 +550,11 @@ export default function App() {
           for (const [key, val] of Object.entries(parsed.months)) {
             const ym = key.replace("month:", "");
             const [yy, mm] = ym.split("-").map((x) => parseInt(x, 10));
-            await window.storage.set(key, JSON.stringify(val), false);
+            if (window.storage && window.storage.set) {
+              await window.storage.set(key, JSON.stringify(val), false);
+            } else {
+              localStorage.setItem(key, JSON.stringify(val));
+            }
             newCache[`${yy}-${pad2(mm)}`] = val;
           }
           cacheRef.current = newCache;
@@ -526,8 +608,10 @@ export default function App() {
             <div className="display" style={{ fontSize: 13, letterSpacing: 3, color: GOLD, fontWeight: 700 }}>MOA</div>
             <div className="display" style={{ fontSize: 26, fontWeight: 700, marginTop: 2 }}>모으다</div>
           </div>
-          <button onClick={() => setSettingsOpen(true)} style={{ padding: 8, marginTop: 4 }}><SettingsIcon size={20} color={INK} /></button>
+          <button onClick={() => setSettingsOpen(true)} style={{ padding: 8, marginTop: 4, background: "transparent", border: "none" }}><SettingsIcon size={20} color={INK} /></button>
         </div>
+
+        <InstallBanner />
 
         {loading ? (
           <div style={{ padding: 40, textAlign: "center", color: MUTED }}>불러오는 중…</div>
@@ -546,7 +630,7 @@ export default function App() {
                 taxMode={settings.taxMode}
               />
             )}
-            {tab === "analysis" && <AnalysisView monthTotals={monthTotals} />}
+            {tab === "analysis" && <AnalysisView monthTotals={monthTotals} monthlySeries={monthlySeries} yearTotals={yearTotals} year={year} yearScanLoaded={yearScanLoaded} />}
           </>
         )}
 
@@ -565,6 +649,7 @@ export default function App() {
             onAdd={(entry) => addEntry(selectedDay, entry)}
             onDelete={(id) => deleteEntry(selectedDay, id)}
             onMeta={(meta) => updateDayMeta(selectedDay, meta)}
+            onAddStorePreset={addStorePreset}
           />
         )}
 
@@ -576,6 +661,7 @@ export default function App() {
             onAddRecurring={addRecurring}
             onToggleRecurring={toggleRecurring}
             onDeleteRecurring={deleteRecurring}
+            onDeleteStorePreset={deleteStorePreset}
             onExportBackup={exportBackup}
             onImportBackup={importBackup}
             onExportCSV={exportCSV}
@@ -585,32 +671,46 @@ export default function App() {
         {toast && (
           <div style={{ position: "fixed", bottom: 90, left: "50%", background: INK, color: "#fff", padding: "10px 18px", borderRadius: 20, fontSize: 13, fontWeight: 600, zIndex: 80, animation: "fadeIn 0.2s ease-out", whiteSpace: "nowrap" }}>{toast}</div>
         )}
-
-        <InstallBanner />
       </div>
     </div>
   );
 }
 
-// ---------- install banner (home-screen shortcut hint) ----------
+// ---------- Install Banner ----------
 function InstallBanner() {
   const [visible, setVisible] = useState(false);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     (async () => {
       let dismissed = false;
-      try { const res = await window.storage.get("installBannerDismissed", false); dismissed = !!(res && res.value === "1"); } catch (e) { /* not set */ }
+      try {
+        if (window.storage && window.storage.get) {
+          const res = await window.storage.get("installBannerDismissed", false);
+          dismissed = !!(res && res.value === "1");
+        } else {
+          dismissed = localStorage.getItem("installBannerDismissed") === "1";
+        }
+      } catch (e) { }
       const isStandalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
       const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       setVisible(!dismissed && !isStandalone && isMobile);
       setReady(true);
     })();
   }, []);
-  const dismiss = async () => { setVisible(false); try { await window.storage.set("installBannerDismissed", "1", false); } catch (e) { /* ignore */ } };
+  const dismiss = async () => {
+    setVisible(false);
+    try {
+      if (window.storage && window.storage.set) {
+        await window.storage.set("installBannerDismissed", "1", false);
+      } else {
+        localStorage.setItem("installBannerDismissed", "1");
+      }
+    } catch (e) { }
+  };
   if (!ready || !visible) return null;
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   return (
-    <div style={{ position: "fixed", bottom: 72, left: "50%", transform: "translateX(-50%)", width: "calc(100% - 24px)", maxWidth: 456, background: INK, color: "#fff", borderRadius: 14, padding: "14px 16px", zIndex: 45, boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }}>
+    <div style={{ margin: "14px 14px 0", background: INK, color: "#fff", borderRadius: 14, padding: "14px 16px", boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
         <Smartphone size={20} style={{ flexShrink: 0, marginTop: 2 }} />
         <div style={{ flex: 1 }}>
@@ -627,7 +727,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- Calendar (확대된 셀 + 금액 없는 2줄 스케줄 표기) ----------
+// ---------- CalendarView ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -639,12 +739,12 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   return (
     <div style={{ padding: "14px 14px 90px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <button onClick={() => changeMonth(-1)} style={{ padding: 8 }}><ChevronLeft size={20} color={INK} /></button>
+        <button onClick={() => changeMonth(-1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronLeft size={20} color={INK} /></button>
         <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>{year}년 {month + 1}월</div>
-        <button onClick={() => changeMonth(1)} style={{ padding: 8 }}><ChevronRight size={20} color={INK} /></button>
+        <button onClick={() => changeMonth(1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronRight size={20} color={INK} /></button>
       </div>
 
-      <button onClick={onSaveWallpaper} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${GOLD}`, color: GOLD, borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 13, marginBottom: 14 }}>
+      <button onClick={onSaveWallpaper} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 13, marginBottom: 14 }}>
         <Camera size={16} /> 배경화면 이미지 저장
       </button>
 
@@ -652,7 +752,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         {WEEK_LABELS.map((w) => <div key={w} style={{ textAlign: "center", fontSize: 11, color: MUTED, fontWeight: 600, padding: "4px 0" }}>{w}</div>)}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 5 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 5, width: "100%", boxSizing: "border-box" }}>
         {cells.map((d, i) => {
           if (d === null) return <div key={i} style={{ minHeight: 92 }} />;
           const dk = pad2(d);
@@ -664,31 +764,32 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
           return (
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
-              minHeight: 92, border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
+              minHeight: 92, width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box", overflow: "hidden",
+              border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
               borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
-              alignItems: "flex-start", justifyContent: "flex-start", padding: "8px 7px", position: "relative", textAlign: "left",
+              alignItems: "flex-start", justifyContent: "flex-start", padding: "8px 6px", position: "relative", textAlign: "left",
             }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-                <span className="mono" style={{ fontSize: 12, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
-                  {d} ({WEEK_LABELS[wd]})
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", minWidth: 0 }}>
+                <span className="mono" style={{ fontSize: 14, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK), whiteSpace: "nowrap" }}>
+                  {d}
                 </span>
-                {dayObj?.label && <span style={{ width: 7, height: 7, borderRadius: 7, background: labelColorOf(dayObj.label), flexShrink: 0 }} />}
+                {dayObj?.label && <span style={{ width: 7, height: 7, borderRadius: 7, background: labelColorOf(dayObj.label), flexShrink: 0, marginLeft: 4 }} />}
               </div>
 
-              <div style={{ marginTop: 6, width: "100%", lineHeight: 1.3 }}>
+              <div style={{ marginTop: 6, width: "100%", minWidth: 0, lineHeight: 1.3 }}>
                 {conflict ? (
-                  <div style={{ fontSize: 11, fontWeight: 700, color: EXPENSE }}>⚠️ 시간대<br />중복</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: EXPENSE }}>⚠️ 시간대<br />중복</div>
                 ) : work.length ? (
                   <>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: storeColor(work[0].category), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{work[0].category}</div>
-                    <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: SHIFT_INFO[work[0].shift]?.color }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: storeColor(work[0].category), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{work[0].category}</div>
+                    <div className="mono" style={{ fontSize: 11.5, fontWeight: 700, color: SHIFT_INFO[work[0].shift]?.color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
                       {SHIFT_INFO[work[0].shift]?.label}{work.length > 1 ? ` 외${work.length - 1}` : ""}
                     </div>
                   </>
                 ) : dayObj?.label ? (
                   <>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: labelColorOf(dayObj.label) }}>{dayObj.label}</div>
-                    {dayObj.memo && <div style={{ fontSize: 10, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: labelColorOf(dayObj.label), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 9.5, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{dayObj.memo}</div>}
                   </>
                 ) : null}
               </div>
@@ -705,8 +806,8 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   );
 }
 
-// ---------- Day entry modal ----------
-function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta }) {
+// ---------- DayModal ----------
+function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
   const [memo, setMemo] = useState("");
@@ -716,10 +817,12 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherAmt, setOtherAmt] = useState("");
   const [otherMemo, setOtherMemo] = useState("");
-  const [store, setStore] = useState(STORE_PRESETS[0].name);
+  const allStores = [...STORE_PRESETS, ...(settings.customStores || [])];
+  const [store, setStore] = useState(allStores[0]?.name || "");
   const [customStore, setCustomStore] = useState("");
   const [useCustomStore, setUseCustomStore] = useState(false);
-  const [shift, setShift] = useState("A");
+  const [saveAsPreset, setSaveAsPreset] = useState(true);
+  const [shift, setShift] = useState("A1");
   const entries = dayObj.entries || [];
   const conflict = computeConflict(entries);
 
@@ -744,9 +847,14 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const dailyPreview = (parseFloat(units) || 0) * (settings.dailyRate || DEFAULT_DAILY);
 
   const registerShift = () => {
-    const storeName = useCustomStore ? (customStore.trim() || "직접입력 매장") : store;
-    const amt = shift === "full" ? (settings.fixedRates?.two || TWO_SHIFT) : (settings.fixedRates?.one || ONE_SHIFT);
+    let storeName = store;
+    if (useCustomStore) {
+      storeName = customStore.trim() || "직접입력 매장";
+      if (saveAsPreset && onAddStorePreset) onAddStorePreset(storeName);
+    }
+    const amt = COMBO_SHIFTS.has(shift) ? (settings.fixedRates?.two || TWO_SHIFT) : (settings.fixedRates?.one || ONE_SHIFT);
     onAdd({ id: uid(), type: "income", category: storeName, shift, amount: amt, memo: "" });
+    if (useCustomStore) { setUseCustomStore(false); setStore(storeName); setCustomStore(""); }
   };
 
   return (
@@ -754,7 +862,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
       <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out" }}>
         <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>{year}.{pad2(month + 1)}.{pad2(day)}</div>
-          <button onClick={onClose} style={{ padding: 6 }}><X size={20} color={MUTED} /></button>
+          <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none" }}><X size={20} color={MUTED} /></button>
         </div>
         <TornEdge color={CARD} />
 
@@ -781,23 +889,30 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
             <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
               <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>매장</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                {STORE_PRESETS.map((s) => (
+                {allStores.map((s) => (
                   <button key={s.name} onClick={() => { setStore(s.name); setUseCustomStore(false); }} style={{ padding: "6px 10px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${!useCustomStore && store === s.name ? s.color : PAPER_LINE}`, background: !useCustomStore && store === s.name ? s.color : "transparent", color: !useCustomStore && store === s.name ? "#fff" : INK }}>{s.name}</button>
                 ))}
                 <button onClick={() => setUseCustomStore(true)} style={{ padding: "6px 10px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${useCustomStore ? INDIGO : PAPER_LINE}`, background: useCustomStore ? INDIGO : "transparent", color: useCustomStore ? "#fff" : INK }}>+ 직접입력</button>
               </div>
               {useCustomStore && (
-                <input placeholder="매장명 직접 입력" value={customStore} onChange={(e) => setCustomStore(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, marginBottom: 10 }} />
+                <div style={{ marginBottom: 10 }}>
+                  <input placeholder="매장명 직접 입력" value={customStore} onChange={(e) => setCustomStore(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, marginBottom: 6 }} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: MUTED }}>
+                    <input type="checkbox" checked={saveAsPreset} onChange={(e) => setSaveAsPreset(e.target.checked)} />
+                    이 매장 프리셋에 저장해두기 (다음에 바로 선택 가능)
+                  </label>
+                </div>
               )}
               <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>근무 조</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 10 }}>
                 {Object.entries(SHIFT_INFO).map(([key, info]) => (
-                  <button key={key} onClick={() => setShift(key)} className="mono" style={{ flex: 1, padding: "10px 4px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, border: `1.3px solid ${shift === key ? info.color : PAPER_LINE}`, background: shift === key ? info.color : "transparent", color: shift === key ? "#fff" : INK }}>
+                  <button key={key} onClick={() => setShift(key)} className="mono" style={{ padding: "10px 4px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, border: `1.3px solid ${shift === key ? info.color : PAPER_LINE}`, background: shift === key ? info.color : "transparent", color: shift === key ? "#fff" : INK }}>
                     {info.label}
                   </button>
                 ))}
               </div>
-              <button onClick={registerShift} style={{ width: "100%", background: INCOME, color: "#fff", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>근무 등록</button>
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>단일 조(A1·A2·C)는 1근, 조합 조(A1/C·A2/C)는 2근으로 계산돼요</div>
+              <button onClick={registerShift} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>근무 등록</button>
             </div>
           )}
 
@@ -808,7 +923,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 <input inputMode="decimal" value={hours} onChange={(e) => setHours(e.target.value)} className="mono" style={{ width: 64, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 14, textAlign: "center" }} />
                 <span style={{ fontSize: 13, color: "#6B6455" }}>시간 × {won(settings.hourlyRate || DEFAULT_HOURLY)}</span>
               </div>
-              <button onClick={() => quickIncome("근무(시급제)", Math.round(hourlyPreview), `${hours}시간`)} style={{ width: "100%", background: INCOME, color: "#fff", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>등록</button>
+              <button onClick={() => quickIncome("근무(시급제)", Math.round(hourlyPreview), `${hours}시간`)} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>등록</button>
             </div>
           )}
 
@@ -819,17 +934,17 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 <input inputMode="decimal" value={units} onChange={(e) => setUnits(e.target.value)} className="mono" style={{ width: 64, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 14, textAlign: "center" }} />
                 <span style={{ fontSize: 13, color: "#6B6455" }}>× {won(settings.dailyRate || DEFAULT_DAILY)}</span>
               </div>
-              <button onClick={() => quickIncome("근무(일급제)", Math.round(dailyPreview), `${units}공수`)} style={{ width: "100%", background: INCOME, color: "#fff", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>등록</button>
+              <button onClick={() => quickIncome("근무(일급제)", Math.round(dailyPreview), `${units}공수`)} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>등록</button>
             </div>
           )}
 
           {!otherOpen ? (
-            <button onClick={() => setOtherOpen(true)} style={{ fontSize: 12, color: INDIGO, fontWeight: 700, marginBottom: 18 }}>+ 기타 수입 추가</button>
+            <button onClick={() => setOtherOpen(true)} style={{ fontSize: 12, color: INDIGO, fontWeight: 700, marginBottom: 18, background: "transparent", border: "none" }}>+ 기타 수입 추가</button>
           ) : (
             <div style={{ marginBottom: 18 }}>
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                 <input inputMode="numeric" placeholder="금액" value={otherAmt} onChange={(e) => setOtherAmt(e.target.value)} className="mono" style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 14 }} />
-                <button onClick={addOtherIncome} style={{ background: INCOME, color: "#fff", borderRadius: 10, padding: "0 16px" }}><Plus size={18} /></button>
+                <button onClick={addOtherIncome} style={{ background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "0 16px" }}><Plus size={18} /></button>
               </div>
               <input placeholder="메모 (예: 팁, 보너스)" value={otherMemo} onChange={(e) => setOtherMemo(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }} />
             </div>
@@ -843,7 +958,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <input inputMode="numeric" placeholder="금액" value={amount} onChange={(e) => setAmount(e.target.value)} className="mono" style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "10px 12px", fontSize: 14 }} />
-            <button onClick={addExpense} style={{ background: EXPENSE, color: "#fff", borderRadius: 10, padding: "0 16px" }}><Plus size={18} /></button>
+            <button onClick={addExpense} style={{ background: EXPENSE, color: "#fff", border: "none", borderRadius: 10, padding: "0 16px" }}><Plus size={18} /></button>
           </div>
           <input placeholder="메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 18 }} />
 
@@ -863,7 +978,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: e.type === "income" ? INCOME : EXPENSE }}>{e.type === "income" ? "+" : "-"}{won(e.amount)}</span>
-                    <button onClick={() => onDelete(e.id)} style={{ padding: 4 }}><Trash2 size={15} color="#C9BFA8" /></button>
+                    <button onClick={() => onDelete(e.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
                   </div>
                 </div>
               ))}
@@ -875,7 +990,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   );
 }
 
-// ---------- Daily budget card ----------
+// ---------- DailyBudgetCard ----------
 function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpent, realToday, year, month }) {
   if (!isCurrentMonth) {
     return (
@@ -914,9 +1029,9 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>정산</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={() => setYear(year - 1)} style={{ padding: 4 }}><ChevronLeft size={16} /></button>
+          <button onClick={() => setYear(year - 1)} style={{ padding: 4, background: "transparent", border: "none" }}><ChevronLeft size={16} /></button>
           <span className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{year}년</span>
-          <button onClick={() => setYear(year + 1)} style={{ padding: 4 }}><ChevronRight size={16} /></button>
+          <button onClick={() => setYear(year + 1)} style={{ padding: 4, background: "transparent", border: "none" }}><ChevronRight size={16} /></button>
         </div>
       </div>
 
@@ -924,11 +1039,11 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>이번 달 출근 현황</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A.color} />
+        <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A1.color} />
         <MiniStatCard label="C조" value={ws.countC} color={SHIFT_INFO.C.color} />
-        <MiniStatCard label="풀조" value={ws.countFull} color={SHIFT_INFO.full.color} />
+        <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.A1C.color} />
       </div>
-      <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 근무일 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 횟수 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.countA + ws.countC + ws.countFull}회</span></div>
+      <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 출근 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.totalGeun}근</span> <span style={{ color: "#C9BFA8" }}>(A/C조는 2근으로 계산)</span></div>
 
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -936,10 +1051,10 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
           {goalEdit ? (
             <div style={{ display: "flex", gap: 6 }}>
               <input autoFocus inputMode="numeric" defaultValue={goal} onChange={(e) => setGoalInput(e.target.value)} className="mono" style={{ width: 100, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "4px 8px", fontSize: 12 }} />
-              <button onClick={commitGoal} style={{ fontSize: 12, fontWeight: 700, color: INDIGO }}>저장</button>
+              <button onClick={commitGoal} style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>저장</button>
             </div>
           ) : (
-            <button onClick={() => { setGoalEdit(true); setGoalInput(String(goal)); }} className="mono" style={{ fontSize: 12, fontWeight: 700, color: INDIGO }}>{won(goal)} 수정</button>
+            <button onClick={() => { setGoalEdit(true); setGoalInput(String(goal)); }} className="mono" style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>{won(goal)} 수정</button>
           )}
         </div>
         <div style={{ height: 10, background: "#EFEADD", borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
@@ -947,10 +1062,11 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         </div>
         <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: INDIGO }}>{achieveRate.toFixed(0)}%</div>
         <div style={{ fontSize: 12, color: "#8A8272", marginTop: 4 }}>
-          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · 풀조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
+          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · 조합조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
         </div>
       </div>
 
+      <div className="display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{`<${month + 1}월 급여>`}</div>
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <Row label="세전 총수당" value={monthTotals.gross} color={INCOME} />
         <Row label={`${taxInfo.label} 공제`} value={-(monthTotals.gross * taxInfo.rate)} color={EXPENSE} />
@@ -988,13 +1104,44 @@ function MiniStatCard({ label, value, color }) {
 }
 
 // ---------- Analysis ----------
-function AnalysisView({ monthTotals }) {
+function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearScanLoaded }) {
   const data = EXPENSE_CATS.filter((c) => c.key !== ASSET_CAT && monthTotals.byCat[c.key] > 0).map((c) => ({ name: c.key, value: monthTotals.byCat[c.key] || 0, color: c.color }));
   const hasData = data.length > 0;
   const netOut = monthTotals.expense, saved = monthTotals.asset, total = netOut + saved || 1;
+  const monthsWithPay = monthlySeries.filter((m) => m.gross > 0).length;
+  const avgMonthly = monthsWithPay ? yearTotals.gross / monthsWithPay : 0;
+  const hasYearData = monthsWithPay > 0;
   return (
     <div style={{ padding: "16px 20px 100px" }}>
       <div className="display" style={{ fontSize: 19, fontWeight: 700, marginBottom: 16 }}>소비 패턴 분석</div>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>{year}년 월별 급여 추이</div>
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        {hasYearData ? (
+          <div style={{ width: "100%", height: 180 }}>
+            <ResponsiveContainer>
+              <BarChart data={monthlySeries} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke={PAPER_LINE} />
+                <XAxis dataKey="month" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: PAPER_LINE }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} tickFormatter={(v) => `${Math.round(v / 10000)}만`} />
+                <Tooltip formatter={(v) => won(v)} labelStyle={{ color: INK }} />
+                <Bar dataKey="gross" fill={GOLD} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (<div style={{ textAlign: "center", color: MUTED, fontSize: 13, padding: "30px 0" }}>{yearScanLoaded ? `${year}년 수입 기록이 아직 없어요` : "불러오는 중…"}</div>)}
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <div style={{ flex: 1, textAlign: "center", border: `1.3px solid ${GOLD}`, borderRadius: 12, padding: "10px 4px" }}>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, marginBottom: 4 }}>연평균 월급여(세전)</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>{won(avgMonthly)}</div>
+          </div>
+          <div style={{ flex: 1, textAlign: "center", border: `1.3px solid ${INCOME}`, borderRadius: 12, padding: "10px 4px" }}>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, marginBottom: 4 }}>올해 총 수령액(세후)</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: INCOME }}>{won(yearTotals.net)}</div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>카테고리별 지출 비중</div>
         {hasData ? (
@@ -1027,7 +1174,7 @@ function AnalysisView({ monthTotals }) {
 }
 
 // ---------- Settings modal ----------
-function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onExportBackup, onImportBackup, onExportCSV }) {
+function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
   const [rTwo, setRTwo] = useState(settings.fixedRates?.two || TWO_SHIFT);
@@ -1053,7 +1200,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
       <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out" }}>
         <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>설정</div>
-          <button onClick={onClose} style={{ padding: 6 }}><X size={20} color={MUTED} /></button>
+          <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none" }}><X size={20} color={MUTED} /></button>
         </div>
         <TornEdge color={CARD} />
 
@@ -1067,8 +1214,8 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
 
           {settings.workType === "fixed" && (
             <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-              <RateField label="A조/C조 (1근)" value={rOne} setValue={setROne} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, one: parseInt(rOne, 10) || ONE_SHIFT } })} />
-              <RateField label="풀조 (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
+              <RateField label="단일조 A1/A2/C (1근)" value={rOne} setValue={setROne} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, one: parseInt(rOne, 10) || ONE_SHIFT } })} />
+              <RateField label="조합조 A1C/A2C (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
             </div>
           )}
           {settings.workType === "hourly" && (
@@ -1085,6 +1232,28 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
             <SegButton active={settings.taxMode === "none"} onClick={() => onPatch({ taxMode: "none" })}>비과세/미공제</SegButton>
           </div>
 
+          <SectionTitle>매장 프리셋 관리</SectionTitle>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
+            기본 매장 5곳은 항상 유지되고, 캘린더에서 "+ 직접입력"으로 추가한 매장은 여기서 삭제할 수 있어요.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {STORE_PRESETS.map((s) => (
+              <span key={s.name} style={{ padding: "6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${s.color}`, color: s.color }}>{s.name}</span>
+            ))}
+          </div>
+          {(settings.customStores || []).length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
+              {settings.customStores.map((s) => (
+                <span key={s.name} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px 6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${s.color}`, color: s.color }}>
+                  {s.name}
+                  <button onClick={() => onDeleteStorePreset(s.name)} style={{ display: "flex", padding: 2, background: "transparent", border: "none" }}><X size={12} color={s.color} /></button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 20 }}>아직 직접 추가한 매장이 없어요.</div>
+          )}
+
           <SectionTitle>고정 항목 (매달 자동 등록)</SectionTitle>
           {(settings.recurring || []).length > 0 && (
             <div style={{ marginBottom: 12 }}>
@@ -1095,8 +1264,8 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
                     <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: r.type === "income" ? INCOME : EXPENSE }}>{r.type === "income" ? "+" : "-"}{won(r.amount)}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button onClick={() => onToggleRecurring(r.id)} style={{ fontSize: 11, fontWeight: 700, color: r.active ? INDIGO : MUTED, border: `1px solid ${r.active ? INDIGO : PAPER_LINE}`, borderRadius: 20, padding: "4px 10px" }}>{r.active ? "사용 중" : "꺼짐"}</button>
-                    <button onClick={() => onDeleteRecurring(r.id)} style={{ padding: 4 }}><Trash2 size={16} color="#C9BFA8" /></button>
+                    <button onClick={() => onToggleRecurring(r.id)} style={{ fontSize: 11, fontWeight: 700, color: r.active ? INDIGO : MUTED, border: `1px solid ${r.active ? INDIGO : PAPER_LINE}`, borderRadius: 20, padding: "4px 10px", background: "transparent" }}>{r.active ? "사용 중" : "꺼짐"}</button>
+                    <button onClick={() => onDeleteRecurring(r.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={16} color="#C9BFA8" /></button>
                   </div>
                 </div>
               ))}
@@ -1123,16 +1292,16 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
             </div>
           </div>
           <input placeholder="메모 (예: 월세, 통신비)" value={memo} onChange={(e) => setMemo(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 12 }} />
-          <button onClick={submitRecurring} style={{ width: "100%", background: INK, color: "#fff", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 24 }}>
+          <button onClick={submitRecurring} style={{ width: "100%", background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 24 }}>
             <RefreshCw size={14} /> 고정 항목 추가
           </button>
 
           <SectionTitle>데이터 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 12, lineHeight: 1.5 }}>평소 기록은 자동으로 저장돼요. 아래 버튼은 비상용 백업이나 세금 신고용 자료가 필요할 때만 눌러주세요.</div>
-          <button onClick={onExportBackup} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${INDIGO}`, color: INDIGO, borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13, marginBottom: 8 }}><Download size={15} /> JSON 백업 다운로드</button>
-          <button onClick={() => fileRef.current?.click()} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${MUTED}`, color: INK, borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13, marginBottom: 8 }}><Upload size={15} /> JSON 백업 복원</button>
+          <button onClick={onExportBackup} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${INDIGO}`, color: INDIGO, background: "transparent", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13, marginBottom: 8 }}><Download size={15} /> JSON 백업 다운로드</button>
+          <button onClick={() => fileRef.current?.click()} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${MUTED}`, color: INK, background: "transparent", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13, marginBottom: 8 }}><Upload size={15} /> JSON 백업 복원</button>
           <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) onImportBackup(e.target.files[0]); e.target.value = ""; }} />
-          <button onClick={onExportCSV} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: GOLD, color: "#fff", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13 }}><FileSpreadsheet size={15} /> 종소세 증빙용 CSV 내보내기</button>
+          <button onClick={onExportCSV} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: GOLD, color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13 }}><FileSpreadsheet size={15} /> 종소세 증빙용 CSV 내보내기</button>
         </div>
       </div>
     </div>
