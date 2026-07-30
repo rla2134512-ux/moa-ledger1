@@ -18,8 +18,8 @@ const GOLD = "#B08D57";
 const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
-const ONE_SHIFT = 140000; // 단일 조 (A1/A2/C) 단가
-const TWO_SHIFT = 280000; // 조합 조 (A1/C, A2/C) 2근 단가
+const ONE_SHIFT = 140000; // 단일 조 (A/A1/A2/C) 단가
+const TWO_SHIFT = 280000; // 조합 조 (A/C, A1/C, A2/C) 2근 단가
 const DEFAULT_HOURLY = 12000;
 const DEFAULT_DAILY = 130000;
 
@@ -48,23 +48,27 @@ const TAX_MODES = {
   none: { label: "비과세/미공제", rate: 0 },
 };
 
-// 세분화된 근무 조: A1/A2/C는 단일 슬롯(1근), A1C/A2C는 오전+오후 연속(2근)
+// 세분화된 근무 조 (A조 추가 및 A1/A2 시간 안내 표기 반영)
 const SHIFT_INFO = {
-  A1: { label: "A1조", short: "A1", color: GOLD },
-  A2: { label: "A2조", short: "A2", color: "#C77B4A" },
-  C: { label: "C조", short: "C", color: INDIGO },
-  A1C: { label: "A1/C", short: "A1/C", color: INK },
-  A2C: { label: "A2/C", short: "A2/C", color: "#6B5B4A" },
+  A: { label: "A조", short: "A", color: GOLD, time: "" },
+  A1: { label: "A1조", short: "A1", color: GOLD, time: "6:30-13:30" },
+  A2: { label: "A2조", short: "A2", color: "#C77B4A", time: "7:00-14:00" },
+  C: { label: "C조", short: "C", color: INDIGO, time: "" },
+  AC: { label: "A/C조", short: "A/C", color: INK, time: "" },
+  A1C: { label: "A1/C", short: "A1/C", color: INK, time: "" },
+  A2C: { label: "A2/C", short: "A2/C", color: "#6B5B4A", time: "" },
 };
-// 각 조가 점유하는 시간대 슬롯
+
 const SHIFT_SLOTS = {
+  A: ["morning"],
   A1: ["morning"],
   A2: ["morning"],
   C: ["afternoon"],
+  AC: ["morning", "afternoon"],
   A1C: ["morning", "afternoon"],
   A2C: ["morning", "afternoon"],
 };
-const COMBO_SHIFTS = new Set(["A1C", "A2C"]); // 2근(조합 조)
+const COMBO_SHIFTS = new Set(["AC", "A1C", "A2C"]); // 2근 (조합 조)
 
 const STORE_PRESETS = [
   { name: "T2 불가리팝업", color: "#B5432E" },
@@ -111,7 +115,7 @@ const DEFAULT_SETTINGS = {
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
   hourlyRate: DEFAULT_HOURLY,
   dailyRate: DEFAULT_DAILY,
-  customStores: [], // 사용자가 추가한 매장 프리셋 [{name, color}]
+  customStores: [],
 };
 
 // ---------- storage helpers ----------
@@ -217,13 +221,6 @@ function applyRecurringToMonth(year, month, monthData, recurringList, realToday)
 }
 
 // ---------- wallpaper calendar PNG ----------
-function truncateToWidth(ctx, text, maxWidth) {
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let t = text;
-  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
-  return t + "…";
-}
-
 function generateCalendarPNG(year, month, daysData) {
   const width = 1080, height = 2220;
   const canvas = document.createElement("canvas");
@@ -265,7 +262,6 @@ function generateCalendarPNG(year, month, daysData) {
     const row = Math.floor(idx / 7);
     const x = gridLeft + col * cellW;
     const y = gridTop + row * cellH;
-    const wd = new Date(year, month, d).getDay();
 
     ctx.strokeStyle = PAPER_LINE;
     ctx.lineWidth = 2;
@@ -288,30 +284,23 @@ function generateCalendarPNG(year, month, daysData) {
       ctx.fill();
     }
 
-    const maxTextW = cellW - 32;
     if (conflict) {
       ctx.fillStyle = EXPENSE;
       ctx.font = "700 20px sans-serif";
-      ctx.fillText("⚠️ 시간대", x + 16, y + 68);
-      ctx.fillText("중복", x + 16, y + 96);
+      ctx.fillText("⚠️ 중복", x + 16, y + 68);
     } else if (work.length) {
       const first = work[0];
       ctx.fillStyle = storeColor(first.category);
-      ctx.font = "600 19px sans-serif";
-      ctx.fillText(truncateToWidth(ctx, first.category, maxTextW), x + 16, y + 68);
+      ctx.font = "600 18px sans-serif";
+      ctx.fillText(first.category, x + 16, y + 68);
       ctx.fillStyle = SHIFT_INFO[first.shift]?.color || INK;
-      ctx.font = "700 22px sans-serif";
-      const shiftText = SHIFT_INFO[first.shift]?.label + (work.length > 1 ? ` 외 ${work.length - 1}` : "");
-      ctx.fillText(truncateToWidth(ctx, shiftText, maxTextW), x + 16, y + 98);
+      ctx.font = "700 20px sans-serif";
+      const shiftText = SHIFT_INFO[first.shift]?.label + (work.length > 1 ? ` 외${work.length - 1}` : "");
+      ctx.fillText(shiftText, x + 16, y + 96);
     } else if (dayObj && dayObj.label) {
       ctx.fillStyle = labelColorOf(dayObj.label);
       ctx.font = "600 20px sans-serif";
       ctx.fillText(dayObj.label, x + 16, y + 68);
-      if (dayObj.memo) {
-        ctx.fillStyle = MUTED;
-        ctx.font = "500 16px sans-serif";
-        ctx.fillText(truncateToWidth(ctx, dayObj.memo, maxTextW), x + 16, y + 94);
-      }
     }
   }
 
@@ -455,6 +444,7 @@ export default function App() {
   const deleteEntry = (dayNum, id) => mutateDay(dayNum, (d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }));
   const updateDayMeta = (dayNum, meta) => mutateDay(dayNum, (d) => ({ ...d, ...meta }));
 
+  // 정산 집계 로직: A, A1, A2는 모두 A조에 / AC, A1C, A2C는 모두 A/C조에 통합 집계
   const monthTotals = useMemo(() => {
     let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
     const workDaySet = new Set();
@@ -464,9 +454,13 @@ export default function App() {
         gross += e.amount;
         if (e.shift && SHIFT_SLOTS[e.shift]) {
           workDaySet.add(dk);
-          if (COMBO_SHIFTS.has(e.shift)) countFull++;
-          else if (e.shift === "C") countC++;
-          else countA++;
+          if (COMBO_SHIFTS.has(e.shift)) {
+            countFull++; // A/C, A1/C, A2/C -> A/C조로 통합
+          } else if (e.shift === "C") {
+            countC++; // C조
+          } else {
+            countA++; // A, A1, A2 -> A조로 통합
+          }
         }
       } else {
         if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
@@ -727,7 +721,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView ----------
+// ---------- CalendarView (매장명 줄바꿈 및 가독성 개선) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -764,32 +758,34 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
           return (
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
-              minHeight: 92, width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box", overflow: "hidden",
+              minHeight: 92, width: "100%", boxSizing: "border-box",
               border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
               borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
-              alignItems: "flex-start", justifyContent: "flex-start", padding: "8px 6px", position: "relative", textAlign: "left",
+              alignItems: "flex-start", justifyContent: "flex-start", padding: "6px 5px", position: "relative", textAlign: "left",
             }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", minWidth: 0 }}>
-                <span className="mono" style={{ fontSize: 14, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK), whiteSpace: "nowrap" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                <span className="mono" style={{ fontSize: 13, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
                   {d}
                 </span>
-                {dayObj?.label && <span style={{ width: 7, height: 7, borderRadius: 7, background: labelColorOf(dayObj.label), flexShrink: 0, marginLeft: 4 }} />}
+                {dayObj?.label && <span style={{ width: 7, height: 7, borderRadius: 7, background: labelColorOf(dayObj.label), flexShrink: 0 }} />}
               </div>
 
-              <div style={{ marginTop: 6, width: "100%", minWidth: 0, lineHeight: 1.3 }}>
+              <div style={{ marginTop: 4, width: "100%", lineHeight: 1.25, wordBreak: "break-all" }}>
                 {conflict ? (
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: EXPENSE }}>⚠️ 시간대<br />중복</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: EXPENSE }}>⚠️ 시간대 중복</div>
                 ) : work.length ? (
                   <>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: storeColor(work[0].category), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{work[0].category}</div>
-                    <div className="mono" style={{ fontSize: 11.5, fontWeight: 700, color: SHIFT_INFO[work[0].shift]?.color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: storeColor(work[0].category), lineHeight: 1.2 }}>
+                      {work[0].category}
+                    </div>
+                    <div className="mono" style={{ fontSize: 11, fontWeight: 700, color: SHIFT_INFO[work[0].shift]?.color, marginTop: 2 }}>
                       {SHIFT_INFO[work[0].shift]?.label}{work.length > 1 ? ` 외${work.length - 1}` : ""}
                     </div>
                   </>
                 ) : dayObj?.label ? (
                   <>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: labelColorOf(dayObj.label), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{dayObj.label}</div>
-                    {dayObj.memo && <div style={{ fontSize: 9.5, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{dayObj.memo}</div>}
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: labelColorOf(dayObj.label) }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 9.5, color: MUTED }}>{dayObj.memo}</div>}
                   </>
                 ) : null}
               </div>
@@ -806,7 +802,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   );
 }
 
-// ---------- DayModal ----------
+// ---------- DayModal (조 선택 시 A조 및 시간 안내 표기 반영) ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -822,7 +818,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [customStore, setCustomStore] = useState("");
   const [useCustomStore, setUseCustomStore] = useState(false);
   const [saveAsPreset, setSaveAsPreset] = useState(true);
-  const [shift, setShift] = useState("A1");
+  const [shift, setShift] = useState("A");
   const entries = dayObj.entries || [];
   const conflict = computeConflict(entries);
 
@@ -906,12 +902,17 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
               <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>근무 조</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 10 }}>
                 {Object.entries(SHIFT_INFO).map(([key, info]) => (
-                  <button key={key} onClick={() => setShift(key)} className="mono" style={{ padding: "10px 4px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, border: `1.3px solid ${shift === key ? info.color : PAPER_LINE}`, background: shift === key ? info.color : "transparent", color: shift === key ? "#fff" : INK }}>
-                    {info.label}
+                  <button key={key} onClick={() => setShift(key)} className="mono" style={{ padding: "8px 2px", borderRadius: 10, border: `1.3px solid ${shift === key ? info.color : PAPER_LINE}`, background: shift === key ? info.color : "transparent", color: shift === key ? "#fff" : INK, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{info.label}</span>
+                    {info.time && (
+                      <span style={{ fontSize: 9, opacity: shift === key ? 0.9 : 0.6, marginTop: 1, fontWeight: 500 }}>
+                        {info.time}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
-              <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>단일 조(A1·A2·C)는 1근, 조합 조(A1/C·A2/C)는 2근으로 계산돼요</div>
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>단일 조(A·A1·A2·C)는 1근, 조합 조(A/C·A1/C·A2/C)는 2근으로 계산돼요</div>
               <button onClick={registerShift} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>근무 등록</button>
             </div>
           )}
@@ -1039,9 +1040,9 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>이번 달 출근 현황</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A1.color} />
+        <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A.color} />
         <MiniStatCard label="C조" value={ws.countC} color={SHIFT_INFO.C.color} />
-        <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.A1C.color} />
+        <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.AC.color} />
       </div>
       <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 출근 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.totalGeun}근</span> <span style={{ color: "#C9BFA8" }}>(A/C조는 2근으로 계산)</span></div>
 
@@ -1062,7 +1063,7 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         </div>
         <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: INDIGO }}>{achieveRate.toFixed(0)}%</div>
         <div style={{ fontSize: 12, color: "#8A8272", marginTop: 4 }}>
-          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · 조합조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
+          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · A/C조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
         </div>
       </div>
 
@@ -1214,8 +1215,8 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
 
           {settings.workType === "fixed" && (
             <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-              <RateField label="단일조 A1/A2/C (1근)" value={rOne} setValue={setROne} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, one: parseInt(rOne, 10) || ONE_SHIFT } })} />
-              <RateField label="조합조 A1C/A2C (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
+              <RateField label="단일조 A/A1/A2/C (1근)" value={rOne} setValue={setROne} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, one: parseInt(rOne, 10) || ONE_SHIFT } })} />
+              <RateField label="조합조 A/C·A1/C (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
             </div>
           )}
           {settings.workType === "hourly" && (
