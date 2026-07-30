@@ -48,7 +48,6 @@ const TAX_MODES = {
   none: { label: "비과세/미공제", rate: 0 },
 };
 
-// 세분화된 근무 조 (A조 추가 및 A1/A2 시간 안내 표기 반영)
 const SHIFT_INFO = {
   A: { label: "A조", short: "A", color: GOLD, time: "" },
   A1: { label: "A1조", short: "A1", color: GOLD, time: "6:30-13:30" },
@@ -70,7 +69,7 @@ const SHIFT_SLOTS = {
 };
 const COMBO_SHIFTS = new Set(["AC", "A1C", "A2C"]); // 2근 (조합 조)
 
-const STORE_PRESETS = [
+const DEFAULT_STORE_PRESETS = [
   { name: "T2 불가리팝업", color: "#B5432E" },
   { name: "T2 현대스면세", color: "#3B5BA5" },
   { name: "T1 C&P", color: "#0F6B5C" },
@@ -90,7 +89,7 @@ const clampDay = (d, dim) => Math.min(Math.max(1, d), dim);
 const emptyDay = () => ({ entries: [], label: null, memo: "" });
 
 function storeColor(name, customStores = []) {
-  const preset = STORE_PRESETS.find((s) => s.name === name) || customStores.find((s) => s.name === name);
+  const preset = DEFAULT_STORE_PRESETS.find((s) => s.name === name) || customStores.find((s) => s.name === name);
   if (preset) return preset.color;
   let hash = 0;
   for (let i = 0; i < (name || "").length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 997;
@@ -116,6 +115,7 @@ const DEFAULT_SETTINGS = {
   hourlyRate: DEFAULT_HOURLY,
   dailyRate: DEFAULT_DAILY,
   customStores: [],
+  hiddenStores: [],
 };
 
 // ---------- storage helpers ----------
@@ -317,12 +317,12 @@ function downloadDataUrl(filename, dataUrl) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-// ---------- UI Components ----------
+// ---------- UI Components (하단 탭 버튼 1.5배 확대) ----------
 function TabButton({ active, onClick, icon: Icon, label }) {
   return (
-    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1 py-2.5" style={{ color: active ? INK : MUTED, border: "none", background: "transparent" }}>
-      <Icon size={20} strokeWidth={active ? 2.4 : 1.8} />
-      <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: 0.2 }}>{label}</span>
+    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3.5" style={{ color: active ? INK : MUTED, border: "none", background: "transparent", cursor: "pointer" }}>
+      <Icon size={28} strokeWidth={active ? 2.6 : 2.0} />
+      <span style={{ fontSize: 14, fontWeight: active ? 800 : 600, letterSpacing: 0.3 }}>{label}</span>
     </button>
   );
 }
@@ -444,7 +444,6 @@ export default function App() {
   const deleteEntry = (dayNum, id) => mutateDay(dayNum, (d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }));
   const updateDayMeta = (dayNum, meta) => mutateDay(dayNum, (d) => ({ ...d, ...meta }));
 
-  // 정산 집계 로직: A, A1, A2는 모두 A조에 / AC, A1C, A2C는 모두 A/C조에 통합 집계
   const monthTotals = useMemo(() => {
     let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
     const workDaySet = new Set();
@@ -455,11 +454,11 @@ export default function App() {
         if (e.shift && SHIFT_SLOTS[e.shift]) {
           workDaySet.add(dk);
           if (COMBO_SHIFTS.has(e.shift)) {
-            countFull++; // A/C, A1/C, A2/C -> A/C조로 통합
+            countFull++;
           } else if (e.shift === "C") {
-            countC++; // C조
+            countC++;
           } else {
-            countA++; // A, A1, A2 -> A조로 통합
+            countA++;
           }
         }
       } else {
@@ -520,11 +519,24 @@ export default function App() {
   const addStorePreset = (name) => {
     const trimmed = (name || "").trim();
     if (!trimmed) return;
-    const already = STORE_PRESETS.some((s) => s.name === trimmed) || (settings.customStores || []).some((s) => s.name === trimmed);
+    const isHidden = (settings.hiddenStores || []).includes(trimmed);
+    if (isHidden) {
+      patchSettings({ hiddenStores: (settings.hiddenStores || []).filter((s) => s !== trimmed) });
+      return;
+    }
+    const already = DEFAULT_STORE_PRESETS.some((s) => s.name === trimmed) || (settings.customStores || []).some((s) => s.name === trimmed);
     if (already) return;
     patchSettings({ customStores: [...(settings.customStores || []), { name: trimmed, color: storeColor(trimmed) }] });
   };
-  const deleteStorePreset = (name) => patchSettings({ customStores: (settings.customStores || []).filter((s) => s.name !== name) });
+  const deleteStorePreset = (name) => {
+    const isDefault = DEFAULT_STORE_PRESETS.some((s) => s.name === name);
+    if (isDefault) {
+      patchSettings({ hiddenStores: [...new Set([...(settings.hiddenStores || []), name])] });
+    } else {
+      patchSettings({ customStores: (settings.customStores || []).filter((s) => s.name !== name) });
+    }
+  };
+  const resetStorePresets = () => patchSettings({ hiddenStores: [], customStores: [] });
 
   const exportBackup = async () => {
     const months = await listAllMonths();
@@ -628,7 +640,7 @@ export default function App() {
           </>
         )}
 
-        <div style={{ position: "sticky", bottom: 0, display: "flex", background: PAPER, borderTop: `1px solid ${PAPER_LINE}`, boxShadow: "0 -4px 16px rgba(0,0,0,0.04)" }}>
+        <div style={{ position: "sticky", bottom: 0, display: "flex", background: PAPER, borderTop: `1.5px solid ${PAPER_LINE}`, boxShadow: "0 -4px 20px rgba(0,0,0,0.06)", zIndex: 30 }}>
           <TabButton active={tab === "calendar"} onClick={() => setTab("calendar")} icon={Calendar} label="캘린더" />
           <TabButton active={tab === "report"} onClick={() => setTab("report")} icon={Gauge} label="정산" />
           <TabButton active={tab === "analysis"} onClick={() => setTab("analysis")} icon={PieChartIcon} label="분석" />
@@ -656,6 +668,7 @@ export default function App() {
             onToggleRecurring={toggleRecurring}
             onDeleteRecurring={deleteRecurring}
             onDeleteStorePreset={deleteStorePreset}
+            onResetStorePresets={resetStorePresets}
             onExportBackup={exportBackup}
             onImportBackup={importBackup}
             onExportCSV={exportCSV}
@@ -721,7 +734,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (매장명 줄바꿈 및 가독성 개선) ----------
+// ---------- CalendarView ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -731,7 +744,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   const isToday = (d) => { const t = new Date(); return d === t.getDate() && month === t.getMonth() && year === t.getFullYear(); };
 
   return (
-    <div style={{ padding: "14px 14px 90px" }}>
+    <div style={{ padding: "14px 14px 100px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <button onClick={() => changeMonth(-1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronLeft size={20} color={INK} /></button>
         <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>{year}년 {month + 1}월</div>
@@ -802,7 +815,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   );
 }
 
-// ---------- DayModal (조 선택 시 A조 및 시간 안내 표기 반영) ----------
+// ---------- DayModal ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -813,7 +826,12 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherAmt, setOtherAmt] = useState("");
   const [otherMemo, setOtherMemo] = useState("");
-  const allStores = [...STORE_PRESETS, ...(settings.customStores || [])];
+
+  const hiddenStores = settings.hiddenStores || [];
+  const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
+  const activeCustoms = (settings.customStores || []).filter((s) => !hiddenStores.includes(s.name));
+  const allStores = [...activeDefaults, ...activeCustoms];
+
   const [store, setStore] = useState(allStores[0]?.name || "");
   const [customStore, setCustomStore] = useState("");
   const [useCustomStore, setUseCustomStore] = useState(false);
@@ -1175,7 +1193,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
 }
 
 // ---------- Settings modal ----------
-function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onExportBackup, onImportBackup, onExportCSV }) {
+function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
   const [rTwo, setRTwo] = useState(settings.fixedRates?.two || TWO_SHIFT);
@@ -1187,6 +1205,11 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
   const [amount, setAmount] = useState("");
   const [day, setDay] = useState("25");
   const [memo, setMemo] = useState("");
+
+  const hiddenStores = settings.hiddenStores || [];
+  const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
+  const activeCustoms = (settings.customStores || []).filter((s) => !hiddenStores.includes(s.name));
+  const allActiveStores = [...activeDefaults, ...activeCustoms];
 
   const submitRecurring = () => {
     const amt = parseInt(amount.replace(/[^0-9]/g, ""), 10);
@@ -1235,24 +1258,24 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
 
           <SectionTitle>매장 프리셋 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
-            기본 매장 5곳은 항상 유지되고, 캘린더에서 "+ 직접입력"으로 추가한 매장은 여기서 삭제할 수 있어요.
+            등록된 매장 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요. 9월 등 매장이 완전히 바뀔 때 편하게 정리해 보세요.
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-            {STORE_PRESETS.map((s) => (
-              <span key={s.name} style={{ padding: "6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${s.color}`, color: s.color }}>{s.name}</span>
-            ))}
-          </div>
-          {(settings.customStores || []).length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
-              {settings.customStores.map((s) => (
+          {allActiveStores.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {allActiveStores.map((s) => (
                 <span key={s.name} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px 6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${s.color}`, color: s.color }}>
                   {s.name}
-                  <button onClick={() => onDeleteStorePreset(s.name)} style={{ display: "flex", padding: 2, background: "transparent", border: "none" }}><X size={12} color={s.color} /></button>
+                  <button onClick={() => onDeleteStorePreset(s.name)} style={{ display: "flex", padding: 2, background: "transparent", border: "none", cursor: "pointer" }}><X size={12} color={s.color} /></button>
                 </span>
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: 12, color: MUTED, marginBottom: 20 }}>아직 직접 추가한 매장이 없어요.</div>
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>등록된 매장이 없어요. 수입 입력에서 새 매장을 추가해 보세요.</div>
+          )}
+          {(hiddenStores.length > 0 || (settings.customStores || []).length > 0) && (
+            <button onClick={onResetStorePresets} style={{ fontSize: 11.5, color: INDIGO, fontWeight: 700, background: "transparent", border: "none", padding: 0, marginBottom: 20, cursor: "pointer" }}>
+              ↺ 기본 매장 목록으로 전체 복원하기
+            </button>
           )}
 
           <SectionTitle>고정 항목 (매달 자동 등록)</SectionTitle>
