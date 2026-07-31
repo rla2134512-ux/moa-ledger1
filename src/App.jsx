@@ -18,7 +18,7 @@ const GOLD = "#B08D57";
 const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
-const DEFAULT_SAVING_GOAL = 500000; // 기본 월 적금/저축 목표액
+const DEFAULT_SAVING_GOAL = 500000;
 const DEFAULT_PAYDAY = 10; // 기본 급여일 (매달 10일)
 const ONE_SHIFT = 140000; // 단일 조 (A/A1/A2/C) 단가
 const TWO_SHIFT = 280000; // 조합 조 (A/C, A1/C, A2/C) 2근 단가
@@ -1086,12 +1086,16 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-// ---------- Report ----------
+// ---------- Report (전달 근무 수당 기준 급여 입금 D-Day 표기 반영) ----------
 function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
   const ws = monthTotals.workStats;
 
+  // 전달(지난달) 근무 수당 표기 (예: 8월 달력 보고 있을 경우 -> 7월 근무 수당)
+  const prevMonthNum = month === 0 ? 12 : month;
+
+  // 급여 D-Day 계산
   const currentToday = new Date();
   const targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
   if (currentToday.getDate() > payday) {
@@ -1101,9 +1105,10 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
   return (
     <div style={{ padding: "16px 20px 100px" }}>
+      {/* 전달 근무 수당 급여 입금 D-Day 카운트다운 배너 */}
       <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-          <span>💰</span> {month + 1}월 급여 입금일 (매달 {payday}일)
+          <span>💰</span> {prevMonthNum}월 근무 급여 입금일 (매달 {payday}일)
         </div>
         <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
           {diffDays === 0 ? "D-DAY 🎉" : `D-${diffDays}`}
