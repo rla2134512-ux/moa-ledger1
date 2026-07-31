@@ -19,7 +19,7 @@ const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
 const DEFAULT_SAVING_GOAL = 500000; // 기본 월 적금/저축 목표액
-const DEFAULT_PAYday = 10; // 기본 급여일 (매달 10일)
+const DEFAULT_PAYDAY = 10; // 기본 급여일 (매달 10일)
 const ONE_SHIFT = 140000; // 단일 조 (A/A1/A2/C) 단가
 const TWO_SHIFT = 280000; // 조합 조 (A/C, A1/C, A2/C) 2근 단가
 const DEFAULT_HOURLY = 12000;
@@ -110,8 +110,8 @@ function computeConflict(entries) {
 
 const DEFAULT_SETTINGS = {
   goal: DEFAULT_GOAL,
-  savingGoal: DEFAULT_SAVING_GOAL, // 적금 목표액
-  payday: DEFAULT_PAYDAY, // 급여일
+  savingGoal: DEFAULT_SAVING_GOAL,
+  payday: DEFAULT_PAYDAY,
   recurring: [],
   workType: "fixed",
   taxMode: "3.3",
@@ -378,7 +378,6 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   
-  // 목표액 수정 상태
   const [goalEdit, setGoalEdit] = useState(false);
   const [goalInput, setGoalInput] = useState("");
   const [savingGoalEdit, setSavingGoalEdit] = useState(false);
@@ -552,7 +551,6 @@ export default function App() {
   };
   const resetStorePresets = () => patchSettings({ hiddenStores: [], customStores: [] });
 
-  // 스케줄 카카오톡 텍스트 복사 기능
   const copyScheduleText = () => {
     const dim = daysInMonth(year, month);
     const list = [];
@@ -777,7 +775,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (스케줄 텍스트 복사 버튼 추가) ----------
+// ---------- CalendarView ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopySchedule }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -794,7 +792,6 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         <button onClick={() => changeMonth(1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronRight size={20} color={INK} /></button>
       </div>
 
-      {/* 캘린더 상단 액션 버튼 그룹 (배경화면 저장 & 스케줄 카톡 복사) */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         <button onClick={onSaveWallpaper} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 12.5 }}>
           <Camera size={15} /> 배경화면 저장
@@ -1058,7 +1055,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   );
 }
 
-// ---------- DailyBudgetCard (저축 목표액 연동 수식 적용) ----------
+// ---------- DailyBudgetCard ----------
 function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpent, realToday, year, month, savingGoal }) {
   if (!isCurrentMonth) {
     return (
@@ -1072,7 +1069,6 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   const remainingDays = Math.max(1, dim - todayD + 1);
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   
-  // 오늘 권장 지출액 = (세후 실수령액 - 고정비 - 월 저축 목표액 - 현재까지 지출) / 남은 일수
   const budget = (monthTotals.net - fixedTotal - (savingGoal || 0) - expenseToDate) / remainingDays;
   const over = budget < 0 || todaySpent > Math.max(budget, 0);
 
@@ -1090,13 +1086,12 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-// ---------- Report (D-Day 카운트다운 & 월 저축 목표 카드 추가) ----------
+// ---------- Report ----------
 function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
   const ws = monthTotals.workStats;
 
-  // 급여 D-Day 계산
   const currentToday = new Date();
   const targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
   if (currentToday.getDate() > payday) {
@@ -1106,7 +1101,6 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
   return (
     <div style={{ padding: "16px 20px 100px" }}>
-      {/* 급여 D-Day 카운트다운 배너 */}
       <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
           <span>💰</span> {month + 1}월 급여 입금일 (매달 {payday}일)
@@ -1127,9 +1121,7 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
       <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={year} month={month} savingGoal={savingGoal} />
 
-      {/* 이번 달 목표 수입 & 저축 목표액 2열 구성 */}
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        {/* 수입 목표 카드 */}
         <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}><Target size={12} /> 수입 목표</div>
@@ -1147,7 +1139,6 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
           <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>달성률 <span className="mono" style={{ fontWeight: 700, color: INK }}>{achieveRate.toFixed(0)}%</span></div>
         </div>
 
-        {/* 저축 목표 카드 */}
         <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}><PiggyBank size={12} color={GOLD} /> 적금/저축 목표</div>
@@ -1281,7 +1272,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (급여일 설정 추가) ----------
+// ---------- Settings modal ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
