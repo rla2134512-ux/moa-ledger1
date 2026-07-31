@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, Calendar, Gauge, PieChart as PieChartIcon,
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
-  Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle,
+  Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, Share2, PiggyBank,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
@@ -18,6 +18,8 @@ const GOLD = "#B08D57";
 const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
+const DEFAULT_SAVING_GOAL = 500000; // 기본 월 적금/저축 목표액
+const DEFAULT_PAYday = 10; // 기본 급여일 (매달 10일)
 const ONE_SHIFT = 140000; // 단일 조 (A/A1/A2/C) 단가
 const TWO_SHIFT = 280000; // 조합 조 (A/C, A1/C, A2/C) 2근 단가
 const DEFAULT_HOURLY = 12000;
@@ -108,6 +110,8 @@ function computeConflict(entries) {
 
 const DEFAULT_SETTINGS = {
   goal: DEFAULT_GOAL,
+  savingGoal: DEFAULT_SAVING_GOAL, // 적금 목표액
+  payday: DEFAULT_PAYDAY, // 급여일
   recurring: [],
   workType: "fixed",
   taxMode: "3.3",
@@ -317,7 +321,7 @@ function downloadDataUrl(filename, dataUrl) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-// ---------- UI Components (하단 탭 버튼 1.5배 확대) ----------
+// ---------- UI Components ----------
 function TabButton({ active, onClick, icon: Icon, label }) {
   return (
     <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3.5" style={{ color: active ? INK : MUTED, border: "none", background: "transparent", cursor: "pointer" }}>
@@ -373,8 +377,12 @@ export default function App() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [selectedDay, setSelectedDay] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  
+  // 목표액 수정 상태
   const [goalEdit, setGoalEdit] = useState(false);
   const [goalInput, setGoalInput] = useState("");
+  const [savingGoalEdit, setSavingGoalEdit] = useState(false);
+  const [savingGoalInput, setSavingGoalInput] = useState("");
   const [toast, setToast] = useState("");
 
   const cacheRef = useRef({});
@@ -500,6 +508,7 @@ export default function App() {
   }, [curData, isCurrentMonth]);
 
   const goal = settings.goal || DEFAULT_GOAL;
+  const savingGoal = settings.savingGoal || DEFAULT_SAVING_GOAL;
   const achieveRate = Math.min(100, (monthTotals.gross / goal) * 100);
   const remaining = Math.max(0, goal - monthTotals.gross);
   const shiftsNeeded = remaining > 0 ? Math.ceil(remaining / (settings.fixedRates?.two || TWO_SHIFT)) : 0;
@@ -508,6 +517,11 @@ export default function App() {
     const n = parseInt(goalInput.replace(/[^0-9]/g, ""), 10);
     if (n > 0) { const s = { ...settings, goal: n }; setSettings(s); await saveSettings(s); }
     setGoalEdit(false);
+  };
+  const commitSavingGoal = async () => {
+    const n = parseInt(savingGoalInput.replace(/[^0-9]/g, ""), 10);
+    if (!isNaN(n) && n >= 0) { const s = { ...settings, savingGoal: n }; setSettings(s); await saveSettings(s); }
+    setSavingGoalEdit(false);
   };
 
   const patchSettings = async (patch) => { const s = { ...settings, ...patch }; setSettings(s); await saveSettings(s); };
@@ -537,6 +551,34 @@ export default function App() {
     }
   };
   const resetStorePresets = () => patchSettings({ hiddenStores: [], customStores: [] });
+
+  // 스케줄 카카오톡 텍스트 복사 기능
+  const copyScheduleText = () => {
+    const dim = daysInMonth(year, month);
+    const list = [];
+    for (let d = 1; d <= dim; d++) {
+      const dk = pad2(d);
+      const dayObj = curData.days[dk];
+      const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
+      const wdLabel = WEEK_LABELS[new Date(year, month, d).getDay()];
+      if (work.length) {
+        const shiftName = SHIFT_INFO[work[0].shift]?.label || work[0].shift;
+        list.push(`${month + 1}/${d}(${wdLabel}) ${shiftName}`);
+      } else if (dayObj?.label) {
+        list.push(`${month + 1}/${d}(${wdLabel}) ${dayObj.label}`);
+      }
+    }
+    if (list.length === 0) {
+      setToast("이번 달 등록된 스케줄이 없어요");
+      return;
+    }
+    const fullText = `[${year}년 ${month + 1}월 스케줄]\n` + list.join(", ");
+    navigator.clipboard.writeText(fullText).then(() => {
+      setToast("스케줄이 클립보드에 복사되었어요!");
+    }).catch(() => {
+      setToast("복사에 실패했어요, 다시 시도해주세요");
+    });
+  };
 
   const exportBackup = async () => {
     const months = await listAllMonths();
@@ -624,16 +666,17 @@ export default function App() {
         ) : (
           <>
             {tab === "calendar" && (
-              <CalendarView year={year} month={month} changeMonth={changeMonth} daysData={curData.days} onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} />
+              <CalendarView year={year} month={month} changeMonth={changeMonth} daysData={curData.days} onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopySchedule={copyScheduleText} />
             )}
             {tab === "report" && (
               <ReportView
                 year={year} setYear={setYear} month={month} isCurrentMonth={isCurrentMonth}
-                monthTotals={monthTotals} yearTotals={yearTotals} goal={goal}
+                monthTotals={monthTotals} yearTotals={yearTotals} goal={goal} savingGoal={savingGoal}
                 achieveRate={achieveRate} remaining={remaining} shiftsNeeded={shiftsNeeded}
                 goalEdit={goalEdit} setGoalEdit={setGoalEdit} goalInput={goalInput} setGoalInput={setGoalInput} commitGoal={commitGoal}
+                savingGoalEdit={savingGoalEdit} setSavingGoalEdit={setSavingGoalEdit} savingGoalInput={savingGoalInput} setSavingGoalInput={setSavingGoalInput} commitSavingGoal={commitSavingGoal}
                 expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday}
-                taxMode={settings.taxMode}
+                taxMode={settings.taxMode} payday={settings.payday || DEFAULT_PAYDAY}
               />
             )}
             {tab === "analysis" && <AnalysisView monthTotals={monthTotals} monthlySeries={monthlySeries} yearTotals={yearTotals} year={year} yearScanLoaded={yearScanLoaded} />}
@@ -734,8 +777,8 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView ----------
-function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper }) {
+// ---------- CalendarView (스케줄 텍스트 복사 버튼 추가) ----------
+function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopySchedule }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
   const cells = [];
@@ -751,9 +794,15 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         <button onClick={() => changeMonth(1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronRight size={20} color={INK} /></button>
       </div>
 
-      <button onClick={onSaveWallpaper} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 13, marginBottom: 14 }}>
-        <Camera size={16} /> 배경화면 이미지 저장
-      </button>
+      {/* 캘린더 상단 액션 버튼 그룹 (배경화면 저장 & 스케줄 카톡 복사) */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button onClick={onSaveWallpaper} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 12.5 }}>
+          <Camera size={15} /> 배경화면 저장
+        </button>
+        <button onClick={onCopySchedule} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1.3px solid ${INDIGO}`, color: INDIGO, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 12.5 }}>
+          <Share2 size={15} /> 스케줄 복사
+        </button>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", marginBottom: 6 }}>
         {WEEK_LABELS.map((w) => <div key={w} style={{ textAlign: "center", fontSize: 11, color: MUTED, fontWeight: 600, padding: "4px 0" }}>{w}</div>)}
@@ -1009,8 +1058,8 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   );
 }
 
-// ---------- DailyBudgetCard ----------
-function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpent, realToday, year, month }) {
+// ---------- DailyBudgetCard (저축 목표액 연동 수식 적용) ----------
+function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpent, realToday, year, month, savingGoal }) {
   if (!isCurrentMonth) {
     return (
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16, textAlign: "center", color: MUTED, fontSize: 12 }}>
@@ -1022,7 +1071,9 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   const todayD = realToday.getDate();
   const remainingDays = Math.max(1, dim - todayD + 1);
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
-  const budget = (monthTotals.net - fixedTotal - monthTotals.asset - expenseToDate) / remainingDays;
+  
+  // 오늘 권장 지출액 = (세후 실수령액 - 고정비 - 월 저축 목표액 - 현재까지 지출) / 남은 일수
+  const budget = (monthTotals.net - fixedTotal - (savingGoal || 0) - expenseToDate) / remainingDays;
   const over = budget < 0 || todaySpent > Math.max(budget, 0);
 
   return (
@@ -1030,6 +1081,7 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 6 }}>오늘의 권장 지출액 · 남은 {remainingDays}일</div>
       <div className="mono" style={{ fontSize: 24, fontWeight: 700, color: over ? EXPENSE : INCOME, marginBottom: 6 }}>{won(Math.max(budget, 0))}</div>
       <div style={{ fontSize: 12, color: "#8A8272" }}>
+        {savingGoal > 0 && <span style={{ color: GOLD, fontWeight: 600 }}>[목표 저축액 {won(savingGoal)} 차감] </span>}
         오늘 권장 지출액은 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(Math.max(budget, 0))}</span>입니다.
         {" "}오늘 이미 <span className="mono" style={{ fontWeight: 700 }}>{won(todaySpent)}</span> 썼어요.{" "}
         {budget < 0 ? "이번 달 예산을 초과했어요." : over ? "오늘 권장액을 넘었어요, 내일은 조금 아껴볼까요?" : "잘 지키고 있어요, 이대로 좋아요!"}
@@ -1038,13 +1090,32 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-// ---------- Report ----------
-function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, expenseToDate, todaySpent, realToday, taxMode }) {
+// ---------- Report (D-Day 카운트다운 & 월 저축 목표 카드 추가) ----------
+function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
   const ws = monthTotals.workStats;
+
+  // 급여 D-Day 계산
+  const currentToday = new Date();
+  const targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
+  if (currentToday.getDate() > payday) {
+    targetPayday.setMonth(targetPayday.getMonth() + 1);
+  }
+  const diffDays = Math.ceil((targetPayday - currentToday) / (1000 * 60 * 60 * 24));
+
   return (
     <div style={{ padding: "16px 20px 100px" }}>
+      {/* 급여 D-Day 카운트다운 배너 */}
+      <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+          <span>💰</span> {month + 1}월 급여 입금일 (매달 {payday}일)
+        </div>
+        <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
+          {diffDays === 0 ? "D-DAY 🎉" : `D-${diffDays}`}
+        </div>
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>정산</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1054,7 +1125,46 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         </div>
       </div>
 
-      <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={year} month={month} />
+      <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={year} month={month} savingGoal={savingGoal} />
+
+      {/* 이번 달 목표 수입 & 저축 목표액 2열 구성 */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        {/* 수입 목표 카드 */}
+        <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}><Target size={12} /> 수입 목표</div>
+            {goalEdit ? (
+              <button onClick={commitGoal} style={{ fontSize: 11, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>저장</button>
+            ) : (
+              <button onClick={() => { setGoalEdit(true); setGoalInput(String(goal)); }} style={{ fontSize: 11, color: MUTED, background: "transparent", border: "none" }}>수정</button>
+            )}
+          </div>
+          {goalEdit ? (
+            <input autoFocus inputMode="numeric" defaultValue={goal} onChange={(e) => setGoalInput(e.target.value)} className="mono" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 6, padding: "2px 4px", fontSize: 12 }} />
+          ) : (
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: INDIGO }}>{won(goal)}</div>
+          )}
+          <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>달성률 <span className="mono" style={{ fontWeight: 700, color: INK }}>{achieveRate.toFixed(0)}%</span></div>
+        </div>
+
+        {/* 저축 목표 카드 */}
+        <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}><PiggyBank size={12} color={GOLD} /> 적금/저축 목표</div>
+            {savingGoalEdit ? (
+              <button onClick={commitSavingGoal} style={{ fontSize: 11, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>저장</button>
+            ) : (
+              <button onClick={() => { setSavingGoalEdit(true); setSavingGoalInput(String(savingGoal)); }} style={{ fontSize: 11, color: MUTED, background: "transparent", border: "none" }}>수정</button>
+            )}
+          </div>
+          {savingGoalEdit ? (
+            <input autoFocus inputMode="numeric" defaultValue={savingGoal} onChange={(e) => setSavingGoalInput(e.target.value)} className="mono" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 6, padding: "2px 4px", fontSize: 12 }} />
+          ) : (
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>{won(savingGoal)}</div>
+          )}
+          <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>권장 예산 자동 차감</div>
+        </div>
+      </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>이번 달 출근 현황</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -1063,27 +1173,6 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.AC.color} />
       </div>
       <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 출근 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.totalGeun}근</span> <span style={{ color: "#C9BFA8" }}>(A/C조는 2근으로 계산)</span></div>
-
-      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: MUTED }}><Target size={14} /> 이번 달 목표</div>
-          {goalEdit ? (
-            <div style={{ display: "flex", gap: 6 }}>
-              <input autoFocus inputMode="numeric" defaultValue={goal} onChange={(e) => setGoalInput(e.target.value)} className="mono" style={{ width: 100, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "4px 8px", fontSize: 12 }} />
-              <button onClick={commitGoal} style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>저장</button>
-            </div>
-          ) : (
-            <button onClick={() => { setGoalEdit(true); setGoalInput(String(goal)); }} className="mono" style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>{won(goal)} 수정</button>
-          )}
-        </div>
-        <div style={{ height: 10, background: "#EFEADD", borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
-          <div style={{ height: "100%", width: `${achieveRate}%`, background: INDIGO, borderRadius: 6, transition: "width 0.3s" }} />
-        </div>
-        <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: INDIGO }}>{achieveRate.toFixed(0)}%</div>
-        <div style={{ fontSize: 12, color: "#8A8272", marginTop: 4 }}>
-          {remaining > 0 ? (<>목표까지 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(remaining)}</span> 남음 · A/C조 기준 <span className="mono" style={{ fontWeight: 700, color: INK }}>{shiftsNeeded}회</span> 더 필요</>) : "이번 달 목표를 달성했어요 🎉"}
-        </div>
-      </div>
 
       <div className="display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{`<${month + 1}월 급여>`}</div>
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
@@ -1192,13 +1281,14 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal ----------
+// ---------- Settings modal (급여일 설정 추가) ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
   const [rTwo, setRTwo] = useState(settings.fixedRates?.two || TWO_SHIFT);
   const [rHourly, setRHourly] = useState(settings.hourlyRate || DEFAULT_HOURLY);
   const [rDaily, setRDaily] = useState(settings.dailyRate || DEFAULT_DAILY);
+  const [paydayInput, setPaydayInput] = useState(settings.payday || DEFAULT_PAYDAY);
 
   const [type, setType] = useState("expense");
   const [category, setCategory] = useState(FIXED_CAT);
@@ -1219,6 +1309,11 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
     setAmount(""); setMemo("");
   };
 
+  const commitPayday = () => {
+    const d = Math.min(31, Math.max(1, parseInt(paydayInput, 10) || DEFAULT_PAYDAY));
+    onPatch({ payday: d });
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 60 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out" }}>
@@ -1229,6 +1324,13 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
+          <SectionTitle>급여일 설정 (D-Day 카운트다운)</SectionTitle>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+            <span style={{ fontSize: 13, color: "#6B6455" }}>매달</span>
+            <input inputMode="numeric" value={paydayInput} onChange={(e) => setPaydayInput(e.target.value.replace(/[^0-9]/g, ""))} onBlur={commitPayday} className="mono" style={{ width: 60, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 14, textAlign: "center" }} />
+            <span style={{ fontSize: 13, color: "#6B6455" }}>일이 급여 입금일이에요</span>
+          </div>
+
           <SectionTitle>근무 유형</SectionTitle>
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <SegButton active={settings.workType === "fixed"} onClick={() => onPatch({ workType: "fixed" })}>매장/조 고정수당형</SegButton>
