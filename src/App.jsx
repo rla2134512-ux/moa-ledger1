@@ -3,7 +3,7 @@ import {
   ChevronLeft, ChevronRight, Calendar, Gauge, PieChart as PieChartIcon,
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
   Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, Share2, PiggyBank, FileText, Check,
-  CheckSquare, Square, ListTodo, Repeat, FolderPlus,
+  CheckSquare, Square, ListTodo,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import * as XLSX from "xlsx";
@@ -121,8 +121,8 @@ const DEFAULT_SETTINGS = {
   hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
   customStores: [], hiddenStores: [],
   todoCats: DEFAULT_TODO_CATS,
-  routines: [], // [{id, text, catId, freq: 'daily'|'mon'|'tue'..}]
-  todos: [], // [{id, dateStr, text, done, catId}]
+  routines: [], 
+  todos: [], 
 };
 
 // ---------- storage helpers ----------
@@ -426,7 +426,15 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
+  
+  // 캘린더 탭 연월 데이터 로드
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
+  
+  // 데일리 플래너 선택 연월 데이터 로드 (버그 수정됨)
+  useEffect(() => {
+    const [y, m] = selectedPlannerDate.split("-").map(Number);
+    if (!loading) ensureMonth(y, m - 1);
+  }, [selectedPlannerDate, ensureMonth, loading]);
 
   // To-Do 및 루틴 관리
   const saveTodos = async (newTodos) => {
@@ -756,7 +764,7 @@ export default function App() {
                 realToday={realToday}
                 selectedDateStr={selectedPlannerDate}
                 onSelectDateStr={setSelectedPlannerDate}
-                curData={curData}
+                cache={cache} // 수정됨: 선택 날짜에 맞는 월 데이터를 불러오기 위해 전체 cache 전달!
                 settings={settings}
                 onAddTodo={addTodo}
                 onToggleTodo={toggleTodo}
@@ -834,8 +842,8 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (주간 Mini 캘린더 + 투두메이드 카테고리 체크리스트) ----------
-function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
+// ---------- DailyPlannerView (버그 수정: cache에서 월/일 정확히 가져오기) ----------
+function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
 
@@ -843,7 +851,12 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData
   const selDateObj = new Date(selY, selM - 1, selD);
   const selWd = WEEK_LABELS[selDateObj.getDay()];
 
-  // 이번 주 7일 생성 (일~토)
+  // 선택된 날짜에 맞는 월 데이터 정확히 가져오기
+  const targetMonthKey = `month:${selY}-${pad2(selM)}`;
+  const targetMonthData = cache[targetMonthKey] || { days: {} };
+  const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
+  const workEntries = (selDayData.entries || []).filter((e) => e.shift);
+
   const weekDates = useMemo(() => {
     const list = [];
     const curr = new Date(selDateObj);
@@ -855,9 +868,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData
     }
     return list;
   }, [selectedDateStr]);
-
-  const selDayData = curData.days[pad2(selD)] || emptyDay();
-  const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
   const dateTodos = (settings.todos || []).filter((t) => t.dateStr === selectedDateStr);
@@ -875,7 +885,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData
         {selM}월 {selD}일 ({selWd})
       </div>
 
-      {/* 주간 Mini 캘린더 */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "10px 6px", marginBottom: 16 }}>
         {weekDates.map((d, i) => {
           const ds = dateStrKey(d.getFullYear(), d.getMonth(), d.getDate());
@@ -899,7 +908,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData
         })}
       </div>
 
-      {/* 오늘 스케줄 카드 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
         {workEntries.length > 0 ? (
@@ -916,7 +924,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData
         )}
       </div>
 
-      {/* 카테고리 선택 태그 & 할 일 입력 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>카테고리 선택</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -947,7 +954,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData
           <button onClick={handleAdd} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
         </div>
 
-        {/* 카테고리별 할 일 체크리스트 */}
         {todoCats.map((cat) => {
           const catTodos = dateTodos.filter((t) => t.catId === cat.id);
           if (catTodos.length === 0) return null;
@@ -1313,7 +1319,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   );
 }
 
-// ---------- DayModal (달력 팝업과 오늘 플래너 상호 연동) ----------
+// ---------- DayModal ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -1767,7 +1773,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (카테고리 & 루틴 직접 관리 포함) ----------
+// ---------- Settings modal ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
