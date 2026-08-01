@@ -3,7 +3,7 @@ import {
   ChevronLeft, ChevronRight, Calendar, Gauge, PieChart as PieChartIcon,
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
   Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, Share2, PiggyBank, FileText, Check,
-  CheckSquare, Square, ListTodo,
+  CheckSquare, Square, ListTodo, Repeat, FolderPlus,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import * as XLSX from "xlsx";
@@ -37,6 +37,14 @@ const EXPENSE_CATS = [
 ];
 const ASSET_CAT = "적금/투자";
 const FIXED_CAT = "고정비";
+
+const DEFAULT_TODO_CATS = [
+  { id: "c1", name: "공부", color: "#B5432E" },
+  { id: "c2", name: "일정", color: "#C77B4A" },
+  { id: "c3", name: "알바/근무", color: "#B08D57" },
+  { id: "c4", name: "운동", color: "#3B5BA5" },
+  { id: "c5", name: "학교", color: "#0F6B5C" },
+];
 
 const LABELS = [
   { key: "휴무", color: "#6B7A8F" },
@@ -80,6 +88,7 @@ const WEEK_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
 const pad2 = (n) => String(n).padStart(2, "0");
 const monthKey = (y, m) => `month:${y}-${pad2(m + 1)}`;
+const dateStrKey = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
 const won = (n) => (n < 0 ? "-" : "") + Math.abs(Math.round(n || 0)).toLocaleString("ko-KR") + "원";
 const uid = () => Math.random().toString(36).slice(2, 10);
 const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
@@ -111,7 +120,9 @@ const DEFAULT_SETTINGS = {
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
   hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
   customStores: [], hiddenStores: [],
-  todos: [], // 데일리 할 일 저장소 [{id, text, done, isSomeday, createdAt}]
+  todoCats: DEFAULT_TODO_CATS,
+  routines: [], // [{id, text, catId, freq: 'daily'|'mon'|'tue'..}]
+  todos: [], // [{id, dateStr, text, done, catId}]
 };
 
 // ---------- storage helpers ----------
@@ -364,6 +375,8 @@ export default function App() {
   const [year, setYear] = useState(realToday.getFullYear());
   const [month, setMonth] = useState(realToday.getMonth());
   const [tab, setTab] = useState("calendar"); // calendar | daily | report | analysis
+  const [selectedPlannerDate, setSelectedPlannerDate] = useState(dateStrKey(realToday.getFullYear(), realToday.getMonth(), realToday.getDate()));
+
   const [cache, setCache] = useState({});
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -377,7 +390,6 @@ export default function App() {
   const [savingGoalInput, setSavingGoalInput] = useState("");
   const [toast, setToast] = useState("");
 
-  // 제스처 스와이프 관리 (좌: 데일리, 우: 캘린더)
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
@@ -387,10 +399,8 @@ export default function App() {
     if (!touchStartX.current || !touchEndX.current) return;
     const distance = touchStartX.current - touchEndX.current;
     if (distance > 70) {
-      // 좌로 스와이프 -> 오늘 데일리 플래너로 이동
       if (tab === "calendar") setTab("daily");
     } else if (distance < -70) {
-      // 우로 스와이프 -> 캘린더로 이동
       if (tab === "daily") setTab("calendar");
     }
     touchStartX.current = 0; touchEndX.current = 0;
@@ -418,15 +428,15 @@ export default function App() {
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
 
-  // To-Do 항목 관리
+  // To-Do 및 루틴 관리
   const saveTodos = async (newTodos) => {
     const updated = { ...settings, todos: newTodos };
     setSettings(updated);
     await saveSettings(updated);
   };
-  const addTodo = (text, isSomeday = false) => {
+  const addTodo = (text, dateStr, catId) => {
     if (!text.trim()) return;
-    const newTodo = { id: uid(), text: text.trim(), done: false, isSomeday, createdAt: new Date().toISOString() };
+    const newTodo = { id: uid(), dateStr, text: text.trim(), done: false, catId: catId || (settings.todoCats?.[0]?.id || "c1") };
     saveTodos([...(settings.todos || []), newTodo]);
   };
   const toggleTodo = (id) => {
@@ -744,8 +754,10 @@ export default function App() {
             {tab === "daily" && (
               <DailyPlannerView
                 realToday={realToday}
-                todayData={curData.days[pad2(realToday.getDate())] || emptyDay()}
-                todos={settings.todos || []}
+                selectedDateStr={selectedPlannerDate}
+                onSelectDateStr={setSelectedPlannerDate}
+                curData={curData}
+                settings={settings}
                 onAddTodo={addTodo}
                 onToggleTodo={toggleTodo}
                 onDeleteTodo={deleteTodo}
@@ -783,6 +795,10 @@ export default function App() {
             onDelete={(id) => deleteEntry(selectedDay, id)}
             onMeta={(meta) => updateDayMeta(selectedDay, meta)}
             onAddStorePreset={addStorePreset}
+            onAddTodo={(text, catId) => addTodo(text, dateStrKey(year, month, selectedDay), catId)}
+            todos={settings.todos || []}
+            onToggleTodo={toggleTodo}
+            onDeleteTodo={deleteTodo}
           />
         )}
 
@@ -818,123 +834,148 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (좌측 스와이프 데일리 To-Do 화면) ----------
-function DailyPlannerView({ realToday, todayData, todos, onAddTodo, onToggleTodo, onDeleteTodo }) {
-  const [inputToday, setInputToday] = useState("");
-  const [inputSomeday, setInputSomeday] = useState("");
+// ---------- DailyPlannerView (주간 Mini 캘린더 + 투두메이드 카테고리 체크리스트) ----------
+function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, curData, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
+  const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
+  const [inputText, setInputText] = useState("");
 
-  const todayWork = (todayData.entries || []).filter((e) => e.shift);
-  const wd = WEEK_LABELS[realToday.getDay()];
+  const [selY, selM, selD] = selectedDateStr.split("-").map((x) => parseInt(x, 10));
+  const selDateObj = new Date(selY, selM - 1, selD);
+  const selWd = WEEK_LABELS[selDateObj.getDay()];
 
-  const todayTodos = todos.filter((t) => !t.isSomeday);
-  const somedayTodos = todos.filter((t) => t.isSomeday);
+  // 이번 주 7일 생성 (일~토)
+  const weekDates = useMemo(() => {
+    const list = [];
+    const curr = new Date(selDateObj);
+    const dayOfWeek = curr.getDay();
+    curr.setDate(curr.getDate() - dayOfWeek);
+    for (let i = 0; i < 7; i++) {
+      list.push(new Date(curr));
+      curr.setDate(curr.getDate() + 1);
+    }
+    return list;
+  }, [selectedDateStr]);
 
-  const handleAddToday = () => {
-    if (!inputToday.trim()) return;
-    onAddTodo(inputToday, false);
-    setInputToday("");
-  };
+  const selDayData = curData.days[pad2(selD)] || emptyDay();
+  const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
-  const handleAddSomeday = () => {
-    if (!inputSomeday.trim()) return;
-    onAddTodo(inputSomeday, true);
-    setInputSomeday("");
+  const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
+  const dateTodos = (settings.todos || []).filter((t) => t.dateStr === selectedDateStr);
+
+  const handleAdd = () => {
+    if (!inputText.trim()) return;
+    onAddTodo(inputText, selectedDateStr, activeCatId);
+    setInputText("");
   };
 
   return (
     <div style={{ padding: "16px 20px 100px" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: GOLD, letterSpacing: 1, marginBottom: 2 }}>DAILY PLANNER</div>
-      <div className="display" style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
-        {realToday.getMonth() + 1}.{realToday.getDate()} ({wd}) 오늘
+      <div style={{ fontSize: 12, fontWeight: 700, color: GOLD, letterSpacing: 1, marginBottom: 2 }}>TODAY PLANNER</div>
+      <div className="display" style={{ fontSize: 24, fontWeight: 700, marginBottom: 14 }}>
+        {selM}월 {selD}일 ({selWd})
+      </div>
+
+      {/* 주간 Mini 캘린더 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "10px 6px", marginBottom: 16 }}>
+        {weekDates.map((d, i) => {
+          const ds = dateStrKey(d.getFullYear(), d.getMonth(), d.getDate());
+          const isSel = ds === selectedDateStr;
+          const isRealToday = ds === dateStrKey(realToday.getFullYear(), realToday.getMonth(), realToday.getDate());
+          return (
+            <button
+              key={i}
+              onClick={() => onSelectDateStr(ds)}
+              style={{
+                display: "flex", flexDirection: "column", alignItems: "center", padding: "6px 0", borderRadius: 10,
+                border: isSel ? `1.5px solid ${GOLD}` : "none", background: isSel ? "#FCFAF5" : "transparent",
+              }}
+            >
+              <span style={{ fontSize: 10, color: i === 0 ? EXPENSE : i === 6 ? INDIGO : MUTED, fontWeight: 600 }}>{WEEK_LABELS[i]}</span>
+              <span className="mono" style={{ fontSize: 14, fontWeight: isSel || isRealToday ? 700 : 500, color: isRealToday ? GOLD : INK, marginTop: 2 }}>
+                {d.getDate()}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* 오늘 스케줄 카드 */}
-      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 6 }}>오늘의 스케줄</div>
-        {todayWork.length > 0 ? (
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
+        {workEntries.length > 0 ? (
           <div>
-            <span style={{ fontSize: 15, fontWeight: 700, color: storeColor(todayWork[0].category) }}>{todayWork[0].category} </span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: SHIFT_INFO[todayWork[0].shift]?.color }}>
-              · {SHIFT_INFO[todayWork[0].shift]?.label}
+            <span style={{ fontSize: 14, fontWeight: 700, color: storeColor(workEntries[0].category) }}>{workEntries[0].category} </span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: SHIFT_INFO[workEntries[0].shift]?.color }}>
+              · {SHIFT_INFO[workEntries[0].shift]?.label}
             </span>
           </div>
-        ) : todayData.label ? (
-          <div style={{ fontSize: 15, fontWeight: 700, color: labelColorOf(todayData.label) }}>{todayData.label}</div>
+        ) : selDayData.label ? (
+          <div style={{ fontSize: 14, fontWeight: 700, color: labelColorOf(selDayData.label) }}>{selDayData.label}</div>
         ) : (
-          <div style={{ fontSize: 13, color: MUTED }}>등록된 근무 일정이 없어요</div>
-        )}
-        {todayData.memo && <div style={{ fontSize: 12, color: INK, marginTop: 4 }}>메모: {todayData.memo}</div>}
-      </div>
-
-      {/* 오늘 할 일 섹션 */}
-      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 20 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span>오늘</span>
-          <span className="mono" style={{ fontSize: 12, color: MUTED }}>
-            {todayTodos.filter((t) => t.done).length}/{todayTodos.length} 완료
-          </span>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input
-            placeholder="+ 오늘 할 일을 추가하세요"
-            value={inputToday}
-            onChange={(e) => setInputToday(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleAddToday(); }}
-            style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }}
-          />
-          <button onClick={handleAddToday} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
-        </div>
-
-        {todayTodos.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {todayTodos.map((item) => (
-              <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
-                <button onClick={() => onToggleTodo(item.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none", textAlign: "left", cursor: "pointer", flex: 1 }}>
-                  {item.done ? <CheckSquare size={18} color={INCOME} /> : <Square size={18} color={MUTED} />}
-                  <span style={{ fontSize: 13.5, color: item.done ? MUTED : INK, textDecoration: item.done ? "line-through" : "none", fontWeight: item.done ? 400 : 600 }}>
-                    {item.text}
-                  </span>
-                </button>
-                <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "16px 0" }}>오늘 추가된 할 일이 없어요</div>
+          <div style={{ fontSize: 12.5, color: MUTED }}>등록된 일정이 없어요. 캘린더에서 클릭해 추가해보세요.</div>
         )}
       </div>
 
-      {/* 언젠가 할 일 (보관함) */}
-      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 12 }}>언젠가 할 일</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input
-            placeholder="+ 언젠가 해야 할 일 (아이디어 등)"
-            value={inputSomeday}
-            onChange={(e) => setInputSomeday(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleAddSomeday(); }}
-            style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }}
-          />
-          <button onClick={handleAddSomeday} style={{ background: INDIGO, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
+      {/* 카테고리 선택 태그 & 할 일 입력 */}
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16 }}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>카테고리 선택</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {todoCats.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setActiveCatId(cat.id)}
+              style={{
+                padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                border: `1.3px solid ${activeCatId === cat.id ? cat.color : PAPER_LINE}`,
+                background: activeCatId === cat.id ? cat.color : "transparent",
+                color: activeCatId === cat.id ? "#fff" : INK,
+              }}
+            >
+              {cat.name}
+            </button>
+          ))}
         </div>
 
-        {somedayTodos.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {somedayTodos.map((item) => (
-              <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
-                <button onClick={() => onToggleTodo(item.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none", textAlign: "left", cursor: "pointer", flex: 1 }}>
-                  {item.done ? <CheckSquare size={18} color={INCOME} /> : <Square size={18} color={MUTED} />}
-                  <span style={{ fontSize: 13.5, color: item.done ? MUTED : INK, textDecoration: item.done ? "line-through" : "none" }}>
-                    {item.text}
-                  </span>
-                </button>
-                <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <input
+            placeholder={`+ [${todoCats.find((c) => c.id === activeCatId)?.name || '일반'}] 할 일 추가`}
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+            style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }}
+          />
+          <button onClick={handleAdd} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
+        </div>
+
+        {/* 카테고리별 할 일 체크리스트 */}
+        {todoCats.map((cat) => {
+          const catTodos = dateTodos.filter((t) => t.catId === cat.id);
+          if (catTodos.length === 0) return null;
+          return (
+            <div key={cat.id} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: cat.color, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 8, background: cat.color }} />
+                {cat.name}
               </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "16px 0" }}>언젠가 할 일 목록이 비어 있어요</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {catTodos.map((item) => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
+                    <button onClick={() => onToggleTodo(item.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none", textAlign: "left", cursor: "pointer", flex: 1 }}>
+                      {item.done ? <CheckSquare size={18} color={cat.color} /> : <Square size={18} color={MUTED} />}
+                      <span style={{ fontSize: 13.5, color: item.done ? MUTED : INK, textDecoration: item.done ? "line-through" : "none", fontWeight: item.done ? 400 : 600 }}>
+                        {item.text}
+                      </span>
+                    </button>
+                    <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        {dateTodos.length === 0 && (
+          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "20px 0" }}>등록된 할 일이 없어요. 위 입력창에서 할 일을 추가해 보세요!</div>
         )}
       </div>
     </div>
@@ -1272,8 +1313,8 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   );
 }
 
-// ---------- DayModal ----------
-function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset }) {
+// ---------- DayModal (달력 팝업과 오늘 플래너 상호 연동) ----------
+function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
   const [memo, setMemo] = useState("");
@@ -1283,6 +1324,13 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherAmt, setOtherAmt] = useState("");
   const [otherMemo, setOtherMemo] = useState("");
+
+  const [todoInput, setTodoInput] = useState("");
+  const [selCatId, setSelCatId] = useState(settings.todoCats?.[0]?.id || "c1");
+
+  const dateStr = dateStrKey(year, month, day);
+  const dateTodos = (todos || []).filter((t) => t.dateStr === dateStr);
+  const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
 
   const hiddenStores = settings.hiddenStores || [];
   const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
@@ -1312,6 +1360,12 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   };
   const pickLabel = (key) => onMeta({ label: dayObj.label === key ? null : key });
   const blurDayMemo = () => { if (dayMemo !== (dayObj.memo || "")) onMeta({ memo: dayMemo }); };
+
+  const handleAddTodoSubmit = () => {
+    if (!todoInput.trim()) return;
+    onAddTodo(todoInput, selCatId);
+    setTodoInput("");
+  };
 
   const workType = settings.workType || "fixed";
   const hourlyPreview = (parseFloat(hours) || 0) * (settings.hourlyRate || DEFAULT_HOURLY);
@@ -1353,6 +1407,29 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
           </div>
           <input placeholder="오늘의 메모 (예: 면접 2차 통과)" value={dayMemo} onChange={(e) => setDayMemo(e.target.value)} onBlur={blurDayMemo}
             style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 20 }} />
+
+          {/* 오늘 할 일(To-Do) 바로 등록 섹션 */}
+          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>이 날 할 일(To-Do) 미리 등록</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <select value={selCatId} onChange={(e) => setSelCatId(e.target.value)} style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "0 8px", fontSize: 12, background: PAPER }}>
+              {todoCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input placeholder="할 일 입력" value={todoInput} onChange={(e) => setTodoInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleAddTodoSubmit(); }} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13 }} />
+            <button onClick={handleAddTodoSubmit} style={{ background: INDIGO, color: "#fff", border: "none", borderRadius: 10, padding: "0 12px", fontWeight: 700, fontSize: 12 }}>추가</button>
+          </div>
+
+          {dateTodos.length > 0 && (
+            <div style={{ marginBottom: 20, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 12px" }}>
+              {dateTodos.map((t) => (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
+                  <span onClick={() => onToggleTodo(t.id)} style={{ fontSize: 12.5, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK, cursor: "pointer" }}>
+                    {t.done ? "●" : "○"} {t.text}
+                  </span>
+                  <button onClick={() => onDeleteTodo(t.id)} style={{ padding: 2, background: "transparent", border: "none" }}><Trash2 size={13} color="#C9BFA8" /></button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>수입 입력</div>
 
@@ -1690,7 +1767,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal ----------
+// ---------- Settings modal (카테고리 & 루틴 직접 관리 포함) ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
@@ -1705,10 +1782,27 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
   const [day, setDay] = useState("25");
   const [memo, setMemo] = useState("");
 
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatColor, setNewCatColor] = useState("#3B5BA5");
+
   const hiddenStores = settings.hiddenStores || [];
   const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
   const activeCustoms = (settings.customStores || []).filter((s) => !hiddenStores.includes(s.name));
   const allActiveStores = [...activeDefaults, ...activeCustoms];
+
+  const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
+
+  const handleAddTodoCat = () => {
+    if (!newCatName.trim()) return;
+    const newCat = { id: uid(), name: newCatName.trim(), color: newCatColor };
+    onPatch({ todoCats: [...todoCats, newCat] });
+    setNewCatName("");
+  };
+
+  const handleDeleteTodoCat = (id) => {
+    const filtered = todoCats.filter((c) => c.id !== id);
+    onPatch({ todoCats: filtered });
+  };
 
   const submitRecurring = () => {
     const amt = parseInt(amount.replace(/[^0-9]/g, ""), 10);
@@ -1733,6 +1827,22 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
+          {/* 플래너 카테고리 관리 */}
+          <SectionTitle>플래너 카테고리 관리 (투두메이트 방식)</SectionTitle>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {todoCats.map((cat) => (
+              <span key={cat.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${cat.color}`, color: cat.color }}>
+                {cat.name}
+                <button onClick={() => handleDeleteTodoCat(cat.id)} style={{ padding: 0, background: "transparent", border: "none", cursor: "pointer", display: "flex" }}><X size={12} color={cat.color} /></button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+            <input placeholder="새 카테고리 (예: 운동)" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 12.5 }} />
+            <input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)} style={{ width: 36, height: 36, border: "none", background: "transparent", cursor: "pointer" }} />
+            <button onClick={handleAddTodoCat} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 12px", fontWeight: 700, fontSize: 12 }}>추가</button>
+          </div>
+
           <SectionTitle>급여일 설정 (D-Day 카운트다운)</SectionTitle>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
             <span style={{ fontSize: 13, color: "#6B6455" }}>매달</span>
