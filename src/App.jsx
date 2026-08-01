@@ -3,6 +3,7 @@ import {
   ChevronLeft, ChevronRight, Calendar, Gauge, PieChart as PieChartIcon,
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
   Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, Share2, PiggyBank, FileText, Check,
+  CheckSquare, Square, ListTodo,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import * as XLSX from "xlsx";
@@ -110,6 +111,7 @@ const DEFAULT_SETTINGS = {
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
   hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
   customStores: [], hiddenStores: [],
+  todos: [], // 데일리 할 일 저장소 [{id, text, done, isSomeday, createdAt}]
 };
 
 // ---------- storage helpers ----------
@@ -361,7 +363,7 @@ export default function App() {
   const realToday = new Date();
   const [year, setYear] = useState(realToday.getFullYear());
   const [month, setMonth] = useState(realToday.getMonth());
-  const [tab, setTab] = useState("calendar");
+  const [tab, setTab] = useState("calendar"); // calendar | daily | report | analysis
   const [cache, setCache] = useState({});
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -374,6 +376,25 @@ export default function App() {
   const [savingGoalEdit, setSavingGoalEdit] = useState(false);
   const [savingGoalInput, setSavingGoalInput] = useState("");
   const [toast, setToast] = useState("");
+
+  // 제스처 스와이프 관리 (좌: 데일리, 우: 캘린더)
+  const touchStartX = useRef(0);
+  const touchEndX = useRef(0);
+
+  const handleTouchStart = (e) => { touchStartX.current = e.targetTouches[0].clientX; };
+  const handleTouchMove = (e) => { touchEndX.current = e.targetTouches[0].clientX; };
+  const handleTouchEnd = () => {
+    if (!touchStartX.current || !touchEndX.current) return;
+    const distance = touchStartX.current - touchEndX.current;
+    if (distance > 70) {
+      // 좌로 스와이프 -> 오늘 데일리 플래너로 이동
+      if (tab === "calendar") setTab("daily");
+    } else if (distance < -70) {
+      // 우로 스와이프 -> 캘린더로 이동
+      if (tab === "daily") setTab("calendar");
+    }
+    touchStartX.current = 0; touchEndX.current = 0;
+  };
 
   const cacheRef = useRef({});
   useEffect(() => { cacheRef.current = cache; }, [cache]);
@@ -397,7 +418,27 @@ export default function App() {
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
 
-  // 전달(지난달) 실수령액 계산
+  // To-Do 항목 관리
+  const saveTodos = async (newTodos) => {
+    const updated = { ...settings, todos: newTodos };
+    setSettings(updated);
+    await saveSettings(updated);
+  };
+  const addTodo = (text, isSomeday = false) => {
+    if (!text.trim()) return;
+    const newTodo = { id: uid(), text: text.trim(), done: false, isSomeday, createdAt: new Date().toISOString() };
+    saveTodos([...(settings.todos || []), newTodo]);
+  };
+  const toggleTodo = (id) => {
+    const next = (settings.todos || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+    saveTodos(next);
+  };
+  const deleteTodo = (id) => {
+    const next = (settings.todos || []).filter((t) => t.id !== id);
+    saveTodos(next);
+  };
+
+  // 전달 실수령액
   const prevMonthIndex = month === 0 ? 11 : month - 1;
   const prevMonthYear = month === 0 ? year - 1 : year;
   const prevData = cache[mk(prevMonthYear, prevMonthIndex)] || { days: {} };
@@ -553,7 +594,6 @@ export default function App() {
   };
   const resetStorePresets = () => patchSettings({ hiddenStores: [], customStores: [] });
 
-  // 휴무일 줄바꿈 복사
   const copyOffDaysText = () => {
     const dim = daysInMonth(year, month);
     const list = [];
@@ -577,7 +617,6 @@ export default function App() {
     });
   };
 
-  // 엑셀 파싱 후 스케줄 일괄 일치 반영
   const handleBatchScheduleImport = async (parsedMap, storeName) => {
     const k = mk(year, month);
     const data = cache[k] || { days: {} };
@@ -674,7 +713,13 @@ export default function App() {
         @keyframes fadeIn { from { opacity:0; transform: translate(-50%, 6px);} to {opacity:1; transform: translate(-50%,0);} }
       `}</style>
 
-      <div className="app-root" style={{ width: "100%", maxWidth: 480, minHeight: "100vh", position: "relative", background: PAPER }}>
+      <div
+        className="app-root"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{ width: "100%", maxWidth: 480, minHeight: "100vh", position: "relative", background: PAPER }}
+      >
         <div style={{ borderBottom: `1px solid ${PAPER_LINE}`, padding: "18px 20px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <div className="display" style={{ fontSize: 13, letterSpacing: 3, color: GOLD, fontWeight: 700 }}>MOA</div>
@@ -696,6 +741,16 @@ export default function App() {
                 onOpenImportModal={() => setImportModalOpen(true)}
               />
             )}
+            {tab === "daily" && (
+              <DailyPlannerView
+                realToday={realToday}
+                todayData={curData.days[pad2(realToday.getDate())] || emptyDay()}
+                todos={settings.todos || []}
+                onAddTodo={addTodo}
+                onToggleTodo={toggleTodo}
+                onDeleteTodo={deleteTodo}
+              />
+            )}
             {tab === "report" && (
               <ReportView
                 year={year} setYear={setYear} month={month} isCurrentMonth={isCurrentMonth}
@@ -713,6 +768,7 @@ export default function App() {
 
         <div style={{ position: "sticky", bottom: 0, display: "flex", background: PAPER, borderTop: `1.5px solid ${PAPER_LINE}`, boxShadow: "0 -4px 20px rgba(0,0,0,0.06)", zIndex: 30 }}>
           <TabButton active={tab === "calendar"} onClick={() => setTab("calendar")} icon={Calendar} label="캘린더" />
+          <TabButton active={tab === "daily"} onClick={() => setTab("daily")} icon={ListTodo} label="오늘 플래너" />
           <TabButton active={tab === "report"} onClick={() => setTab("report")} icon={Gauge} label="정산" />
           <TabButton active={tab === "analysis"} onClick={() => setTab("analysis")} icon={PieChartIcon} label="분석" />
         </div>
@@ -756,6 +812,129 @@ export default function App() {
 
         {toast && (
           <div style={{ position: "fixed", bottom: 90, left: "50%", background: INK, color: "#fff", padding: "10px 18px", borderRadius: 20, fontSize: 13, fontWeight: 600, zIndex: 80, animation: "fadeIn 0.2s ease-out", whiteSpace: "nowrap" }}>{toast}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- DailyPlannerView (좌측 스와이프 데일리 To-Do 화면) ----------
+function DailyPlannerView({ realToday, todayData, todos, onAddTodo, onToggleTodo, onDeleteTodo }) {
+  const [inputToday, setInputToday] = useState("");
+  const [inputSomeday, setInputSomeday] = useState("");
+
+  const todayWork = (todayData.entries || []).filter((e) => e.shift);
+  const wd = WEEK_LABELS[realToday.getDay()];
+
+  const todayTodos = todos.filter((t) => !t.isSomeday);
+  const somedayTodos = todos.filter((t) => t.isSomeday);
+
+  const handleAddToday = () => {
+    if (!inputToday.trim()) return;
+    onAddTodo(inputToday, false);
+    setInputToday("");
+  };
+
+  const handleAddSomeday = () => {
+    if (!inputSomeday.trim()) return;
+    onAddTodo(inputSomeday, true);
+    setInputSomeday("");
+  };
+
+  return (
+    <div style={{ padding: "16px 20px 100px" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: GOLD, letterSpacing: 1, marginBottom: 2 }}>DAILY PLANNER</div>
+      <div className="display" style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
+        {realToday.getMonth() + 1}.{realToday.getDate()} ({wd}) 오늘
+      </div>
+
+      {/* 오늘 스케줄 카드 */}
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 6 }}>오늘의 스케줄</div>
+        {todayWork.length > 0 ? (
+          <div>
+            <span style={{ fontSize: 15, fontWeight: 700, color: storeColor(todayWork[0].category) }}>{todayWork[0].category} </span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: SHIFT_INFO[todayWork[0].shift]?.color }}>
+              · {SHIFT_INFO[todayWork[0].shift]?.label}
+            </span>
+          </div>
+        ) : todayData.label ? (
+          <div style={{ fontSize: 15, fontWeight: 700, color: labelColorOf(todayData.label) }}>{todayData.label}</div>
+        ) : (
+          <div style={{ fontSize: 13, color: MUTED }}>등록된 근무 일정이 없어요</div>
+        )}
+        {todayData.memo && <div style={{ fontSize: 12, color: INK, marginTop: 4 }}>메모: {todayData.memo}</div>}
+      </div>
+
+      {/* 오늘 할 일 섹션 */}
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>오늘</span>
+          <span className="mono" style={{ fontSize: 12, color: MUTED }}>
+            {todayTodos.filter((t) => t.done).length}/{todayTodos.length} 완료
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input
+            placeholder="+ 오늘 할 일을 추가하세요"
+            value={inputToday}
+            onChange={(e) => setInputToday(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAddToday(); }}
+            style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }}
+          />
+          <button onClick={handleAddToday} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
+        </div>
+
+        {todayTodos.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {todayTodos.map((item) => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
+                <button onClick={() => onToggleTodo(item.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none", textAlign: "left", cursor: "pointer", flex: 1 }}>
+                  {item.done ? <CheckSquare size={18} color={INCOME} /> : <Square size={18} color={MUTED} />}
+                  <span style={{ fontSize: 13.5, color: item.done ? MUTED : INK, textDecoration: item.done ? "line-through" : "none", fontWeight: item.done ? 400 : 600 }}>
+                    {item.text}
+                  </span>
+                </button>
+                <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "16px 0" }}>오늘 추가된 할 일이 없어요</div>
+        )}
+      </div>
+
+      {/* 언젠가 할 일 (보관함) */}
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 12 }}>언젠가 할 일</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input
+            placeholder="+ 언젠가 해야 할 일 (아이디어 등)"
+            value={inputSomeday}
+            onChange={(e) => setInputSomeday(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAddSomeday(); }}
+            style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }}
+          />
+          <button onClick={handleAddSomeday} style={{ background: INDIGO, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
+        </div>
+
+        {somedayTodos.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {somedayTodos.map((item) => (
+              <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
+                <button onClick={() => onToggleTodo(item.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: "transparent", border: "none", textAlign: "left", cursor: "pointer", flex: 1 }}>
+                  {item.done ? <CheckSquare size={18} color={INCOME} /> : <Square size={18} color={MUTED} />}
+                  <span style={{ fontSize: 13.5, color: item.done ? MUTED : INK, textDecoration: item.done ? "line-through" : "none" }}>
+                    {item.text}
+                  </span>
+                </button>
+                <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "16px 0" }}>언젠가 할 일 목록이 비어 있어요</div>
         )}
       </div>
     </div>
@@ -897,12 +1076,12 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
       <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
         {LABELS.map((l) => (<div key={l.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: MUTED }}><span style={{ width: 6, height: 6, borderRadius: 6, background: l.color, display: "inline-block" }} />{l.key}</div>))}
       </div>
-      <div style={{ marginTop: 10, fontSize: 12, color: MUTED, textAlign: "center" }}>날짜를 눌러 근무·지출·일정을 기록하세요 · 금액은 정산 탭에서 확인해요</div>
+      <div style={{ marginTop: 10, fontSize: 12, color: MUTED, textAlign: "center" }}>날짜를 눌러 근무·지출·일정을 기록하세요 · 왼쪽으로 스와이프하면 오늘 플래너가 열려요</div>
     </div>
   );
 }
 
-// ---------- ScheduleImportModal (순수 JS 엑셀 자동 스캔 엔진) ----------
+// ---------- ScheduleImportModal ----------
 function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   const [userName, setUserName] = useState("선형윤");
   const [storeName, setStoreName] = useState("T2 불가리팝업");
@@ -961,7 +1140,6 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
         const mapResult = {};
         let foundUser = false;
 
-        // 패턴 A: 이름이 상단 열(Header)에 있는 경우 (불가리 메가 등)
         let nameColIndex = -1;
         let dayColIndex = -1;
         let headerRowIndex = -1;
@@ -994,7 +1172,6 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
             }
           }
         } else {
-          // 패턴 B: 근무조(A조, C조 등)가 헤더이고 셀 안에 이름이 있는 경우 (크리드, C&P 등)
           for (let r = 0; r < data.length; r++) {
             const row = data[r];
             if (!row || row.length === 0) continue;
