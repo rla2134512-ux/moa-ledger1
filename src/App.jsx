@@ -427,14 +427,16 @@ export default function App() {
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
   
-  // 캘린더 탭 연월 데이터 로드
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
   
-  // 데일리 플래너 선택 연월 데이터 로드 (버그 수정됨)
-  useEffect(() => {
-    const [y, m] = selectedPlannerDate.split("-").map(Number);
-    if (!loading) ensureMonth(y, m - 1);
-  }, [selectedPlannerDate, ensureMonth, loading]);
+  // 플래너 날짜 변경 시 메인 연월 상태 동기화
+  const handleSelectPlannerDate = (ds) => {
+    setSelectedPlannerDate(ds);
+    const [y, m] = ds.split("-").map(Number);
+    setYear(y);
+    setMonth(m - 1);
+    ensureMonth(y, m - 1);
+  };
 
   // To-Do 및 루틴 관리
   const saveTodos = async (newTodos) => {
@@ -763,8 +765,8 @@ export default function App() {
               <DailyPlannerView
                 realToday={realToday}
                 selectedDateStr={selectedPlannerDate}
-                onSelectDateStr={setSelectedPlannerDate}
-                cache={cache} // 수정됨: 선택 날짜에 맞는 월 데이터를 불러오기 위해 전체 cache 전달!
+                onSelectDateStr={handleSelectPlannerDate}
+                cache={cache}
                 settings={settings}
                 onAddTodo={addTodo}
                 onToggleTodo={toggleTodo}
@@ -842,7 +844,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (버그 수정: cache에서 월/일 정확히 가져오기) ----------
+// ---------- DailyPlannerView (화살표 주간 이동 & 정확한 월 데이터 바인딩 적용) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -851,12 +853,12 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
   const selDateObj = new Date(selY, selM - 1, selD);
   const selWd = WEEK_LABELS[selDateObj.getDay()];
 
-  // 선택된 날짜에 맞는 월 데이터 정확히 가져오기
   const targetMonthKey = `month:${selY}-${pad2(selM)}`;
   const targetMonthData = cache[targetMonthKey] || { days: {} };
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
+  // 현재 주간 7일 계산
   const weekDates = useMemo(() => {
     const list = [];
     const curr = new Date(selDateObj);
@@ -868,6 +870,13 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
     }
     return list;
   }, [selectedDateStr]);
+
+  // 지난주 / 다음주 주간 단위 이동
+  const changeWeek = (offsetDays) => {
+    const nextDate = new Date(selDateObj);
+    nextDate.setDate(nextDate.getDate() + offsetDays);
+    onSelectDateStr(dateStrKey(nextDate.getFullYear(), nextDate.getMonth() + 1, nextDate.getDate()));
+  };
 
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
   const dateTodos = (settings.todos || []).filter((t) => t.dateStr === selectedDateStr);
@@ -885,29 +894,35 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
         {selM}월 {selD}일 ({selWd})
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "10px 6px", marginBottom: 16 }}>
-        {weekDates.map((d, i) => {
-          const ds = dateStrKey(d.getFullYear(), d.getMonth(), d.getDate());
-          const isSel = ds === selectedDateStr;
-          const isRealToday = ds === dateStrKey(realToday.getFullYear(), realToday.getMonth(), realToday.getDate());
-          return (
-            <button
-              key={i}
-              onClick={() => onSelectDateStr(ds)}
-              style={{
-                display: "flex", flexDirection: "column", alignItems: "center", padding: "6px 0", borderRadius: 10,
-                border: isSel ? `1.5px solid ${GOLD}` : "none", background: isSel ? "#FCFAF5" : "transparent",
-              }}
-            >
-              <span style={{ fontSize: 10, color: i === 0 ? EXPENSE : i === 6 ? INDIGO : MUTED, fontWeight: 600 }}>{WEEK_LABELS[i]}</span>
-              <span className="mono" style={{ fontSize: 14, fontWeight: isSel || isRealToday ? 700 : 500, color: isRealToday ? GOLD : INK, marginTop: 2 }}>
-                {d.getDate()}
-              </span>
-            </button>
-          );
-        })}
+      {/* 주간 Mini 캘린더 (화살표 이동 기능 추가) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "8px 6px", marginBottom: 16 }}>
+        <button onClick={() => changeWeek(-7)} style={{ padding: 6, background: "transparent", border: "none", cursor: "pointer" }}><ChevronLeft size={18} color={INK} /></button>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, flex: 1 }}>
+          {weekDates.map((d, i) => {
+            const ds = dateStrKey(d.getFullYear(), d.getMonth() + 1, d.getDate());
+            const isSel = ds === selectedDateStr;
+            const isRealToday = ds === dateStrKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
+            return (
+              <button
+                key={i}
+                onClick={() => onSelectDateStr(ds)}
+                style={{
+                  display: "flex", flexDirection: "column", alignItems: "center", padding: "6px 0", borderRadius: 10,
+                  border: isSel ? `1.5px solid ${GOLD}` : "none", background: isSel ? "#FCFAF5" : "transparent", cursor: "pointer"
+                }}
+              >
+                <span style={{ fontSize: 10, color: i === 0 ? EXPENSE : i === 6 ? INDIGO : MUTED, fontWeight: 600 }}>{WEEK_LABELS[i]}</span>
+                <span className="mono" style={{ fontSize: 13.5, fontWeight: isSel || isRealToday ? 700 : 500, color: isRealToday ? GOLD : INK, marginTop: 2 }}>
+                  {d.getDate()}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={() => changeWeek(7)} style={{ padding: 6, background: "transparent", border: "none", cursor: "pointer" }}><ChevronRight size={18} color={INK} /></button>
       </div>
 
+      {/* 오늘 스케줄 카드 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
         {workEntries.length > 0 ? (
@@ -924,6 +939,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
         )}
       </div>
 
+      {/* 카테고리 태그 & 할 일 입력 리스트 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>카테고리 선택</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -936,6 +952,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
                 border: `1.3px solid ${activeCatId === cat.id ? cat.color : PAPER_LINE}`,
                 background: activeCatId === cat.id ? cat.color : "transparent",
                 color: activeCatId === cat.id ? "#fff" : INK,
+                cursor: "pointer"
               }}
             >
               {cat.name}
@@ -951,7 +968,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
             onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
             style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }}
           />
-          <button onClick={handleAdd} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700 }}>추가</button>
+          <button onClick={handleAdd} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 14px", fontWeight: 700, cursor: "pointer" }}>추가</button>
         </div>
 
         {todoCats.map((cat) => {
@@ -972,7 +989,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, cache, 
                         {item.text}
                       </span>
                     </button>
-                    <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
+                    <button onClick={() => onDeleteTodo(item.id)} style={{ padding: 4, background: "transparent", border: "none", cursor: "pointer" }}><Trash2 size={15} color="#C9BFA8" /></button>
                   </div>
                 ))}
               </div>
@@ -1414,7 +1431,6 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
           <input placeholder="오늘의 메모 (예: 면접 2차 통과)" value={dayMemo} onChange={(e) => setDayMemo(e.target.value)} onBlur={blurDayMemo}
             style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 20 }} />
 
-          {/* 오늘 할 일(To-Do) 바로 등록 섹션 */}
           <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>이 날 할 일(To-Do) 미리 등록</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             <select value={selCatId} onChange={(e) => setSelCatId(e.target.value)} style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "0 8px", fontSize: 12, background: PAPER }}>
@@ -1833,7 +1849,6 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
-          {/* 플래너 카테고리 관리 */}
           <SectionTitle>플래너 카테고리 관리 (투두메이트 방식)</SectionTitle>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             {todoCats.map((cat) => (
