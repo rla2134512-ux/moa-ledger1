@@ -839,7 +839,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (주간 이동 버튼 & 비동기 데이터 보장) ----------
+// ---------- DailyPlannerView (완벽한 7일 단위 이동 및 정확한 캘린더 스케줄 연동) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -848,7 +848,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
   const selDateObj = new Date(selY, selM - 1, selD);
   const selWd = WEEK_LABELS[selDateObj.getDay()];
 
-  // 비동기로 해당 월 데이터 로드 보장
+  // 선택된 날짜의 연/월 데이터를 확실하게 로드
   useEffect(() => {
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
@@ -858,10 +858,11 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
+  // 이번 주 7일 생성
   const weekDates = useMemo(() => {
     const list = [];
     const curr = new Date(selDateObj);
-    const dayOfWeek = curr.getDay();
+    const dayOfWeek = curr.getDay(); // 0(일)~6(토)
     curr.setDate(curr.getDate() - dayOfWeek);
     for (let i = 0; i < 7; i++) {
       list.push(new Date(curr));
@@ -870,6 +871,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr]);
 
+  // 정확히 7일(1주일) 단위 이동
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selDateObj);
     nextDate.setDate(nextDate.getDate() + offsetDays);
@@ -896,11 +898,11 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "10px 8px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, padding: "0 4px" }}>
           <button onClick={() => changeWeek(-7)} style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 2 }}>
-            <ChevronLeft size={14} /> 지난주
+            <ChevronLeft size={16} /> 지난주
           </button>
-          <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: MUTED }}>{selY}년 {selM}월</span>
+          <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: INK }}>{selY}년 {selM}월</span>
           <button onClick={() => changeWeek(7)} style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 2 }}>
-            다음주 <ChevronRight size={14} />
+            다음주 <ChevronRight size={16} />
           </button>
         </div>
 
@@ -928,6 +930,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         </div>
       </div>
 
+      {/* 캘린더 스케줄 연동 카드 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
         {workEntries.length > 0 ? (
@@ -944,6 +947,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         )}
       </div>
 
+      {/* 카테고리 태그 및 할 일 체크리스트 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>카테고리 선택</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
