@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, Calendar, Gauge, PieChart as PieChartIcon,
   X, Plus, Trash2, Target, Settings as SettingsIcon, Info, RefreshCw,
-  Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, Share2, PiggyBank,
+  Download, Upload, FileSpreadsheet, Smartphone, Camera, AlertTriangle, Share2, PiggyBank, FileText, Check,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
+import * as XLSX from "xlsx";
 
 // ---------- constants ----------
 const INK = "#1C2321";
@@ -19,9 +20,9 @@ const INDIGO = "#3B5BA5";
 
 const DEFAULT_GOAL = 2500000;
 const DEFAULT_SAVING_GOAL = 500000;
-const DEFAULT_PAYDAY = 10; // 기본 급여일 (매달 10일)
-const ONE_SHIFT = 140000; // 단일 조 (A/A1/A2/C) 단가
-const TWO_SHIFT = 280000; // 조합 조 (A/C, A1/C, A2/C) 2근 단가
+const DEFAULT_PAYDAY = 10;
+const ONE_SHIFT = 140000;
+const TWO_SHIFT = 280000;
 const DEFAULT_HOURLY = 12000;
 const DEFAULT_DAILY = 130000;
 
@@ -61,15 +62,10 @@ const SHIFT_INFO = {
 };
 
 const SHIFT_SLOTS = {
-  A: ["morning"],
-  A1: ["morning"],
-  A2: ["morning"],
-  C: ["afternoon"],
-  AC: ["morning", "afternoon"],
-  A1C: ["morning", "afternoon"],
-  A2C: ["morning", "afternoon"],
+  A: ["morning"], A1: ["morning"], A2: ["morning"], C: ["afternoon"],
+  AC: ["morning", "afternoon"], A1C: ["morning", "afternoon"], A2C: ["morning", "afternoon"],
 };
-const COMBO_SHIFTS = new Set(["AC", "A1C", "A2C"]); // 2근 (조합 조)
+const COMBO_SHIFTS = new Set(["AC", "A1C", "A2C"]);
 
 const DEFAULT_STORE_PRESETS = [
   { name: "T2 불가리팝업", color: "#B5432E" },
@@ -109,17 +105,11 @@ function computeConflict(entries) {
 }
 
 const DEFAULT_SETTINGS = {
-  goal: DEFAULT_GOAL,
-  savingGoal: DEFAULT_SAVING_GOAL,
-  payday: DEFAULT_PAYDAY,
-  recurring: [],
-  workType: "fixed",
-  taxMode: "3.3",
+  goal: DEFAULT_GOAL, savingGoal: DEFAULT_SAVING_GOAL, payday: DEFAULT_PAYDAY,
+  recurring: [], workType: "fixed", taxMode: "3.3",
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
-  hourlyRate: DEFAULT_HOURLY,
-  dailyRate: DEFAULT_DAILY,
-  customStores: [],
-  hiddenStores: [],
+  hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
+  customStores: [], hiddenStores: [],
 };
 
 // ---------- storage helpers ----------
@@ -132,7 +122,7 @@ async function loadMonth(y, m) {
       const res = localStorage.getItem(monthKey(y, m));
       if (res) return JSON.parse(res);
     }
-  } catch (e) { /* empty */ }
+  } catch (e) { }
   return { days: {} };
 }
 async function saveMonth(y, m, data) {
@@ -156,7 +146,7 @@ async function loadSettings() {
       const res = localStorage.getItem("settings");
       if (res) return { ...DEFAULT_SETTINGS, ...JSON.parse(res) };
     }
-  } catch (e) { /* default */ }
+  } catch (e) { }
   return { ...DEFAULT_SETTINGS };
 }
 async function saveSettings(s) {
@@ -377,6 +367,7 @@ export default function App() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [selectedDay, setSelectedDay] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   
   const [goalEdit, setGoalEdit] = useState(false);
   const [goalInput, setGoalInput] = useState("");
@@ -405,6 +396,17 @@ export default function App() {
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
+
+  // 전달(지난달) 실수령액 계산
+  const prevMonthIndex = month === 0 ? 11 : month - 1;
+  const prevMonthYear = month === 0 ? year - 1 : year;
+  const prevData = cache[mk(prevMonthYear, prevMonthIndex)] || { days: {} };
+  const prevGross = useMemo(() => {
+    let sum = 0;
+    Object.values(prevData.days || {}).forEach((d) => (d.entries || []).forEach((e) => { if (e.type === "income") sum += e.amount; }));
+    return sum;
+  }, [prevData]);
+  const prevNet = prevGross * (1 - taxRate);
 
   const [yearScan, setYearScan] = useState({});
   const [yearScanLoaded, setYearScanLoaded] = useState(false);
@@ -551,31 +553,55 @@ export default function App() {
   };
   const resetStorePresets = () => patchSettings({ hiddenStores: [], customStores: [] });
 
-  const copyScheduleText = () => {
+  // 휴무일 줄바꿈 복사
+  const copyOffDaysText = () => {
     const dim = daysInMonth(year, month);
     const list = [];
     for (let d = 1; d <= dim; d++) {
       const dk = pad2(d);
       const dayObj = curData.days[dk];
-      const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
       const wdLabel = WEEK_LABELS[new Date(year, month, d).getDay()];
-      if (work.length) {
-        const shiftName = SHIFT_INFO[work[0].shift]?.label || work[0].shift;
-        list.push(`${month + 1}/${d}(${wdLabel}) ${shiftName}`);
-      } else if (dayObj?.label) {
-        list.push(`${month + 1}/${d}(${wdLabel}) ${dayObj.label}`);
+      if (dayObj && dayObj.label === "휴무") {
+        list.push(`${month + 1}/${d}(${wdLabel}) 휴무`);
       }
     }
     if (list.length === 0) {
-      setToast("이번 달 등록된 스케줄이 없어요");
+      setToast("이번 달 설정된 휴무일이 없어요");
       return;
     }
-    const fullText = `[${year}년 ${month + 1}월 스케줄]\n` + list.join(", ");
+    const fullText = `[${month + 1}월 휴무 일정]\n` + list.join("\n");
     navigator.clipboard.writeText(fullText).then(() => {
-      setToast("스케줄이 클립보드에 복사되었어요!");
+      setToast("휴무 일정이 클립보드에 복사되었어요!");
     }).catch(() => {
       setToast("복사에 실패했어요, 다시 시도해주세요");
     });
+  };
+
+  // 엑셀 파싱 후 스케줄 일괄 일치 반영
+  const handleBatchScheduleImport = async (parsedMap, storeName) => {
+    const k = mk(year, month);
+    const data = cache[k] || { days: {} };
+    const nextDays = { ...data.days };
+
+    Object.entries(parsedMap).forEach(([dayNumStr, shiftKey]) => {
+      const dk = pad2(parseInt(dayNumStr, 10));
+      const existing = nextDays[dk] || emptyDay();
+      
+      if (shiftKey === "OFF") {
+        nextDays[dk] = { ...existing, label: "휴무" };
+      } else if (SHIFT_INFO[shiftKey]) {
+        const amt = COMBO_SHIFTS.has(shiftKey) ? (settings.fixedRates?.two || TWO_SHIFT) : (settings.fixedRates?.one || ONE_SHIFT);
+        const newEntry = { id: uid(), type: "income", category: storeName, shift: shiftKey, amount: amt, memo: "" };
+        const cleanEntries = existing.entries.filter((e) => !e.shift);
+        nextDays[dk] = { ...existing, entries: [...cleanEntries, newEntry] };
+      }
+    });
+
+    const next = { ...data, days: nextDays };
+    setCache((prev) => ({ ...prev, [k]: next }));
+    await saveMonth(year, month, next);
+    if (storeName) addStorePreset(storeName);
+    setToast("엑셀 스케줄이 달력에 자동으로 추가되었어요!");
   };
 
   const exportBackup = async () => {
@@ -664,7 +690,11 @@ export default function App() {
         ) : (
           <>
             {tab === "calendar" && (
-              <CalendarView year={year} month={month} changeMonth={changeMonth} daysData={curData.days} onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopySchedule={copyScheduleText} />
+              <CalendarView
+                year={year} month={month} changeMonth={changeMonth} daysData={curData.days}
+                onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopyOffDays={copyOffDaysText}
+                onOpenImportModal={() => setImportModalOpen(true)}
+              />
             )}
             {tab === "report" && (
               <ReportView
@@ -674,7 +704,7 @@ export default function App() {
                 goalEdit={goalEdit} setGoalEdit={setGoalEdit} goalInput={goalInput} setGoalInput={setGoalInput} commitGoal={commitGoal}
                 savingGoalEdit={savingGoalEdit} setSavingGoalEdit={setSavingGoalEdit} savingGoalInput={savingGoalInput} setSavingGoalInput={setSavingGoalInput} commitSavingGoal={commitSavingGoal}
                 expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday}
-                taxMode={settings.taxMode} payday={settings.payday || DEFAULT_PAYDAY}
+                taxMode={settings.taxMode} payday={settings.payday || DEFAULT_PAYDAY} prevNet={prevNet}
               />
             )}
             {tab === "analysis" && <AnalysisView monthTotals={monthTotals} monthlySeries={monthlySeries} yearTotals={yearTotals} year={year} yearScanLoaded={yearScanLoaded} />}
@@ -697,6 +727,14 @@ export default function App() {
             onDelete={(id) => deleteEntry(selectedDay, id)}
             onMeta={(meta) => updateDayMeta(selectedDay, meta)}
             onAddStorePreset={addStorePreset}
+          />
+        )}
+
+        {importModalOpen && (
+          <ScheduleImportModal
+            onClose={() => setImportModalOpen(false)}
+            onImportBatch={handleBatchScheduleImport}
+            settings={settings}
           />
         )}
 
@@ -776,7 +814,7 @@ function InstallBanner() {
 }
 
 // ---------- CalendarView ----------
-function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopySchedule }) {
+function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
   const cells = [];
@@ -792,12 +830,15 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         <button onClick={() => changeMonth(1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronRight size={20} color={INK} /></button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <button onClick={onSaveWallpaper} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 12.5 }}>
-          <Camera size={15} /> 배경화면 저장
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <button onClick={onOpenImportModal} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, border: `1.3px solid ${INDIGO}`, color: INDIGO, background: "transparent", borderRadius: 12, padding: "8px 0", fontWeight: 700, fontSize: 11.5 }}>
+          <FileText size={14} /> 스케줄 스캔
         </button>
-        <button onClick={onCopySchedule} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, border: `1.3px solid ${INDIGO}`, color: INDIGO, background: "transparent", borderRadius: 12, padding: "10px 0", fontWeight: 700, fontSize: 12.5 }}>
-          <Share2 size={15} /> 스케줄 복사
+        <button onClick={onSaveWallpaper} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "8px 0", fontWeight: 700, fontSize: 11.5 }}>
+          <Camera size={14} /> 배경화면 저장
+        </button>
+        <button onClick={onCopyOffDays} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, border: `1.3px solid ${EXPENSE}`, color: EXPENSE, background: "transparent", borderRadius: 12, padding: "8px 0", fontWeight: 700, fontSize: 11.5 }}>
+          <Share2 size={14} /> 휴무일 복사
         </button>
       </div>
 
@@ -857,6 +898,199 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         {LABELS.map((l) => (<div key={l.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: MUTED }}><span style={{ width: 6, height: 6, borderRadius: 6, background: l.color, display: "inline-block" }} />{l.key}</div>))}
       </div>
       <div style={{ marginTop: 10, fontSize: 12, color: MUTED, textAlign: "center" }}>날짜를 눌러 근무·지출·일정을 기록하세요 · 금액은 정산 탭에서 확인해요</div>
+    </div>
+  );
+}
+
+// ---------- ScheduleImportModal (순수 JS 엑셀 자동 스캔 엔진) ----------
+function ScheduleImportModal({ onClose, onImportBatch, settings }) {
+  const [userName, setUserName] = useState("선형윤");
+  const [storeName, setStoreName] = useState("T2 불가리팝업");
+  const [file, setFile] = useState(null);
+  const [parsedPreview, setParsedPreview] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileRef = useRef(null);
+
+  const normalizeShift = (val) => {
+    if (!val) return null;
+    const str = String(val).trim().toUpperCase().replace(/\s+/g, "");
+    if (str === "OFF" || str === "휴무" || str === "휴") return "OFF";
+    if (str.includes("A1/C") || str.includes("A1C")) return "A1C";
+    if (str.includes("A2/C") || str.includes("A2C")) return "A2C";
+    if (str.includes("A/C") || str.includes("AC")) return "AC";
+    if (str === "A1") return "A1";
+    if (str === "A2") return "A2";
+    if (str === "A" || str === "A조") return "A";
+    if (str === "C" || str === "C조") return "C";
+    return null;
+  };
+
+  const handleFileChange = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setErrorMsg("");
+    setParsedPreview(null);
+
+    const isExcel = f.name.endsWith(".xlsx") || f.name.endsWith(".xls") || f.name.endsWith(".csv");
+    if (!isExcel) {
+      setErrorMsg("사진 파싱은 현재 엑셀(.xlsx) 파일 스캔만 지원합니다. 엑셀 스케줄표 파일을 선택해 주세요!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+        if (!data || data.length === 0) {
+          setErrorMsg("엑셀 파일이 비어 있거나 내용을 읽을 수 없습니다.");
+          return;
+        }
+
+        const nameKey = userName.trim();
+        if (!nameKey) {
+          setErrorMsg("찾으실 유저 이름(예: 선형윤)을 먼저 입력해 주세요.");
+          return;
+        }
+
+        const mapResult = {};
+        let foundUser = false;
+
+        // 패턴 A: 이름이 상단 열(Header)에 있는 경우 (불가리 메가 등)
+        let nameColIndex = -1;
+        let dayColIndex = -1;
+        let headerRowIndex = -1;
+
+        for (let r = 0; r < Math.min(data.length, 10); r++) {
+          const row = data[r];
+          for (let c = 0; c < row.length; c++) {
+            const cellVal = String(row[c]).trim();
+            if (cellVal === nameKey) {
+              nameColIndex = c;
+              headerRowIndex = r;
+              foundUser = true;
+            }
+            if (cellVal.includes("일") || cellVal.includes("날짜") || cellVal === "1") {
+              dayColIndex = c;
+            }
+          }
+          if (foundUser) break;
+        }
+
+        if (foundUser && nameColIndex !== -1) {
+          for (let r = headerRowIndex + 1; r < data.length; r++) {
+            const row = data[r];
+            if (!row) continue;
+            const dayCell = String(row[dayColIndex >= 0 ? dayColIndex : 0]).replace(/[^0-9]/g, "");
+            const dayNum = parseInt(dayCell, 10);
+            if (dayNum >= 1 && dayNum <= 31) {
+              const shiftVal = normalizeShift(row[nameColIndex]);
+              if (shiftVal) mapResult[dayNum] = shiftVal;
+            }
+          }
+        } else {
+          // 패턴 B: 근무조(A조, C조 등)가 헤더이고 셀 안에 이름이 있는 경우 (크리드, C&P 등)
+          for (let r = 0; r < data.length; r++) {
+            const row = data[r];
+            if (!row || row.length === 0) continue;
+            const firstCell = String(row[0]).replace(/[^0-9]/g, "");
+            const dayNum = parseInt(firstCell, 10);
+            if (dayNum >= 1 && dayNum <= 31) {
+              for (let c = 1; c < row.length; c++) {
+                const cellVal = String(row[c]).trim();
+                if (cellVal.includes(nameKey)) {
+                  foundUser = true;
+                  const headerShift = normalizeShift(data[0]?.[c] || data[1]?.[c]);
+                  if (headerShift) mapResult[dayNum] = headerShift;
+                }
+              }
+            }
+          }
+        }
+
+        if (!foundUser || Object.keys(mapResult).length === 0) {
+          setErrorMsg(`엑셀 표 안에서 '${nameKey}' 님의 스케줄을 찾지 못했습니다. 이름이 정확히 일치하는지 확인해 주세요.`);
+        } else {
+          setParsedPreview(mapResult);
+        }
+      } catch (err) {
+        console.error(err);
+        setErrorMsg("엑셀 파일 해석 중 오류가 발생했습니다.");
+      }
+    };
+    reader.readAsBinaryString(f);
+  };
+
+  const applyImport = () => {
+    if (!parsedPreview) return;
+    onImportBatch(parsedPreview, storeName.trim() || "스캔 매장");
+    onClose();
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 60 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out", maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>스케줄표 자동 스캔</div>
+          <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none" }}><X size={20} color={MUTED} /></button>
+        </div>
+        <TornEdge color={CARD} />
+
+        <div style={{ padding: "12px 20px 30px" }}>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 14, lineHeight: 1.5 }}>
+            매장 엑셀 근무표(.xlsx)를 업로드하면 표 구조를 분석해 '내 이름'에 해당하는 한 달 치 근무 조를 자동으로 달력에 기입해 줍니다.
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>찾을 유저 이름</div>
+              <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="예: 선형윤" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13 }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록할 매장명</div>
+              <input value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="예: T2 불가리팝업" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13 }} />
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>스케줄 엑셀 파일</div>
+          <button onClick={() => fileRef.current?.click()} style={{ width: "100%", border: `1.5px dashed ${INDIGO}`, borderRadius: 12, padding: "16px 0", textAlign: "center", background: "#FCFAF5", cursor: "pointer", marginBottom: 14 }}>
+            <Upload size={20} color={INDIGO} style={{ margin: "0 auto 6px" }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: INK }}>{file ? file.name : "엑셀(.xlsx) 파일 선택하기"}</div>
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>불가리, 크리드, C&P 등 백화점 근무표 자동 인식</div>
+          </button>
+          <input ref={fileRef} type="file" accept=".xlsx, .xls, .csv" style={{ display: "none" }} onChange={handleFileChange} />
+
+          {errorMsg && (
+            <div style={{ background: "#FBEAE6", border: `1px solid ${EXPENSE}`, borderRadius: 10, padding: "10px 12px", fontSize: 12, color: EXPENSE, marginBottom: 14 }}>
+              {errorMsg}
+            </div>
+          )}
+
+          {parsedPreview && (
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 12, marginBottom: 16, background: "#FFF" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: INCOME, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                <Check size={14} /> 스캔 완료! ({Object.keys(parsedPreview).length}일 치 스케줄 추출됨)
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 110, overflowY: "auto" }}>
+                {Object.entries(parsedPreview).map(([d, sKey]) => (
+                  <span key={d} style={{ fontSize: 11, background: PAPER, padding: "3px 7px", borderRadius: 6, color: INK }}>
+                    {d}일: <strong>{SHIFT_INFO[sKey]?.label || sKey}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={applyImport} disabled={!parsedPreview} style={{ width: "100%", background: parsedPreview ? INK : MUTED, color: "#fff", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 14, cursor: parsedPreview ? "pointer" : "not-allowed" }}>
+            내 달력에 스케줄 일괄 반영하기
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1086,16 +1320,14 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-// ---------- Report (전달 근무 수당 기준 급여 입금 D-Day 표기 반영) ----------
-function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday }) {
+// ---------- Report ----------
+function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday, prevNet }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
   const ws = monthTotals.workStats;
 
-  // 전달(지난달) 근무 수당 표기 (예: 8월 달력 보고 있을 경우 -> 7월 근무 수당)
   const prevMonthNum = month === 0 ? 12 : month;
 
-  // 급여 D-Day 계산
   const currentToday = new Date();
   const targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
   if (currentToday.getDate() > payday) {
@@ -1105,13 +1337,17 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
   return (
     <div style={{ padding: "16px 20px 100px" }}>
-      {/* 전달 근무 수당 급여 입금 D-Day 카운트다운 배너 */}
-      <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-          <span>💰</span> {prevMonthNum}월 근무 급여 입금일 (매달 {payday}일)
+      <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>💰</span> {prevMonthNum}월 근무 급여 입금일 (매달 {payday}일)
+          </div>
+          <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
+            {diffDays === 0 ? "D-DAY 🎉" : `D-${diffDays}`}
+          </div>
         </div>
-        <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
-          {diffDays === 0 ? "D-DAY 🎉" : `D-${diffDays}`}
+        <div style={{ fontSize: 11.5, color: "#C9BFA8", marginTop: 2 }}>
+          입금 예정 실수령액: <span className="mono" style={{ color: "#fff", fontWeight: 700 }}>{won(prevNet)}</span>
         </div>
       </div>
 
