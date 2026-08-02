@@ -839,7 +839,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (13월 버그 해결 및 정확한 주간/스케줄 동기화) ----------
+// ---------- DailyPlannerView (13월 버그 및 캘린더 스케줄 연동 완벽 해결) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -853,7 +853,8 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
-  const targetMonthKey = `month:${selY}-${pad2(selM)}`;
+  // ✅ 수정: 캐시 키 포맷(YYYY-MM)과 정확히 일치하도록 연/월 바인딩 수정
+  const targetMonthKey = `${selY}-${pad2(selM)}`;
   const targetMonthData = cache[targetMonthKey] || { days: {} };
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
@@ -871,14 +872,11 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr, selY, selM, selD]);
 
-  // 정확히 7일(1주일) 단위 이동 함수 (13월 버그 원천 차단)
+  // ✅ 수정: 13월 버그를 일으키던 중복 +1 처리를 없애고 안전한 Date 객체 기반 7일 이동 구현
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selY, selM - 1, selD);
     nextDate.setDate(nextDate.getDate() + offsetDays);
-    const ny = nextDate.getFullYear();
-    const nm = nextDate.getMonth() + 1; // 1~12 안전하게 추출
-    const nd = nextDate.getDate();
-    onSelectDateStr(dateStrKey(ny, nm, nd));
+    onSelectDateStr(dateStrKey(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate()));
   };
 
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
@@ -911,9 +909,9 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
           {weekDates.map((d, i) => {
-            const ds = dateStrKey(d.getFullYear(), d.getMonth() + 1, d.getDate());
+            const ds = dateStrKey(d.getFullYear(), d.getMonth(), d.getDate());
             const isSel = ds === selectedDateStr;
-            const isRealToday = ds === dateStrKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
+            const isRealToday = ds === dateStrKey(realToday.getFullYear(), realToday.getMonth(), realToday.getDate());
             return (
               <button
                 key={i}
