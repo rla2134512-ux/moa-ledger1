@@ -838,7 +838,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (캐시 키 포맷 일치 및 캘린더 스케줄 연동 버그 완전 해결) ----------
+// ---------- DailyPlannerView (캘린더 스케줄 실시간 연동 핵심 수정) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -847,16 +847,16 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
   const selDateObj = new Date(selY, selM - 1, selD);
   const selWd = WEEK_LABELS[selDateObj.getDay()];
 
-  // 선택된 날짜의 연/월 데이터를 확실하게 로드
+  // ✅ 핵심 수정: 플래너 화면에 진입하거나 날짜를 누를 때마다 해당 월 데이터를 무조건 비동기로 보장 및 로드
   useEffect(() => {
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
-  // ✅ 수정: monthKey(y, m)의 결과("month:YYYY-MM")를 사용하여 캐시에서 정확히 데이터 조회
-  const targetMonthCacheKey = monthKey(selY, selM - 1);
-  const targetMonthData = cache[targetMonthCacheKey] || { days: {} };
-  const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
-  const workEntries = (selDayData.entries || []).filter((e) => e.shift);
+  // ✅ 핵심 수정: 캐시에서 해당 월 데이터("month:YYYY-MM")를 안전하고 정확하게 가져오기
+  const targetMonthKey = monthKey(selY, selM - 1);
+  const monthRecord = cache[targetMonthKey];
+  const dayRecord = monthRecord && monthRecord.days ? monthRecord.days[pad2(selD)] : null;
+  const workEntries = dayRecord ? (dayRecord.entries || []).filter((e) => e.shift) : [];
 
   // 이번 주 7일 생성 (일요일 시작)
   const weekDates = useMemo(() => {
@@ -871,7 +871,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr, selY, selM, selD]);
 
-  // ✅ 수정: 13월 버그를 완전히 방지하는 Date 객체 기반 7일 이동
+  // 1주일 단위 안전한 이동
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selY, selM - 1, selD);
     nextDate.setDate(nextDate.getDate() + offsetDays);
@@ -930,7 +930,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         </div>
       </div>
 
-      {/* 캘린더 스케줄 연동 카드 */}
+      {/* 캘린더 스케줄 실시간 연동 카드 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
         {workEntries.length > 0 ? (
@@ -940,8 +940,8 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
               · {SHIFT_INFO[workEntries[0].shift]?.label}
             </span>
           </div>
-        ) : selDayData.label ? (
-          <div style={{ fontSize: 14, fontWeight: 700, color: labelColorOf(selDayData.label) }}>{selDayData.label}</div>
+        ) : dayRecord && dayRecord.label ? (
+          <div style={{ fontSize: 14, fontWeight: 700, color: labelColorOf(dayRecord.label) }}>{dayRecord.label}</div>
         ) : (
           <div style={{ fontSize: 12.5, color: MUTED }}>등록된 일정이 없어요. 캘린더에서 클릭해 추가해보세요.</div>
         )}
@@ -1006,7 +1006,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         })}
 
         {dateTodos.length === 0 && (
-          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "20px 0" }}>등록된 할 일이 없어요. 위 입력창에서 할 일이 추가해 보세요!</div>
+          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "20px 0" }}>등록된 할 일이 없어요. 위 입력창에서 할 일을 추가해 보세요!</div>
         )}
       </div>
     </div>
