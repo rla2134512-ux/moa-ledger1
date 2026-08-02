@@ -428,7 +428,7 @@ export default function App() {
   
   const handleSelectPlannerDate = async (ds) => {
     setSelectedPlannerDate(ds);
-    const [y, m, d] = ds.split("-").map(Number);
+    const [y, m] = ds.split("-").map(Number);
     setYear(y);
     setMonth(m - 1);
     await ensureMonth(y, m - 1);
@@ -839,7 +839,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (안전한 7일 이동 및 캘린더 스케줄 연동) ----------
+// ---------- DailyPlannerView (13월 버그 해결 및 정확한 주간/스케줄 동기화) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -861,7 +861,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
   // 이번 주 7일 생성 (일요일 시작)
   const weekDates = useMemo(() => {
     const list = [];
-    const curr = new Date(selDateObj);
+    const curr = new Date(selY, selM - 1, selD);
     const dayOfWeek = curr.getDay();
     curr.setDate(curr.getDate() - dayOfWeek);
     for (let i = 0; i < 7; i++) {
@@ -869,13 +869,16 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
       curr.setDate(curr.getDate() + 1);
     }
     return list;
-  }, [selectedDateStr]);
+  }, [selectedDateStr, selY, selM, selD]);
 
-  // 정확히 7일(1주일) 단위 이동 함수
+  // 정확히 7일(1주일) 단위 이동 함수 (13월 버그 원천 차단)
   const changeWeek = (offsetDays) => {
-    const nextDate = new Date(selDateObj);
+    const nextDate = new Date(selY, selM - 1, selD);
     nextDate.setDate(nextDate.getDate() + offsetDays);
-    onSelectDateStr(dateStrKey(nextDate.getFullYear(), nextDate.getMonth() + 1, nextDate.getDate()));
+    const ny = nextDate.getFullYear();
+    const nm = nextDate.getMonth() + 1; // 1~12 안전하게 추출
+    const nd = nextDate.getDate();
+    onSelectDateStr(dateStrKey(ny, nm, nd));
   };
 
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
