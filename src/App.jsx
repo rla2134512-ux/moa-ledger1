@@ -405,11 +405,10 @@ export default function App() {
   useEffect(() => { cacheRef.current = cache; }, [cache]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2200); return () => clearTimeout(t); }, [toast]);
 
-  const mk = (y, m) => `${y}-${pad2(m + 1)}`;
   const taxRate = (TAX_MODES[settings.taxMode] || TAX_MODES["3.3"]).rate;
 
   const ensureMonth = useCallback(async (y, m) => {
-    const k = mk(y, m);
+    const k = monthKey(y, m);
     let existing = cacheRef.current[k];
     if (!existing) {
       const data = await loadMonth(y, m);
@@ -455,7 +454,7 @@ export default function App() {
 
   const prevMonthIndex = month === 0 ? 11 : month - 1;
   const prevMonthYear = month === 0 ? year - 1 : year;
-  const prevData = cache[mk(prevMonthYear, prevMonthIndex)] || { days: {} };
+  const prevData = cache[monthKey(prevMonthYear, prevMonthIndex)] || { days: {} };
   const prevGross = useMemo(() => {
     let sum = 0;
     Object.values(prevData.days || {}).forEach((d) => (d.entries || []).forEach((e) => { if (e.type === "income") sum += e.amount; }));
@@ -485,7 +484,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [tab, year]);
 
-  const curData = cache[mk(year, month)] || { days: {} };
+  const curData = cache[monthKey(year, month)] || { days: {} };
 
   const changeMonth = (delta) => {
     let m = month + delta, y = year;
@@ -494,7 +493,7 @@ export default function App() {
   };
 
   const mutateDay = async (dayNum, mutator) => {
-    const k = mk(year, month);
+    const k = monthKey(year, month);
     const data = cache[k] || { days: {} };
     const dk = pad2(dayNum);
     const dayObj = data.days[dk] || emptyDay();
@@ -632,7 +631,7 @@ export default function App() {
   };
 
   const handleBatchScheduleImport = async (parsedMap, storeName) => {
-    const k = mk(year, month);
+    const k = monthKey(year, month);
     const data = cache[k] || { days: {} };
     const nextDays = { ...data.days };
 
@@ -839,7 +838,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (13월 및 스케줄 연동 버그 완전 해결본) ----------
+// ---------- DailyPlannerView (주간 이동 및 캘린더 스케줄 완벽 동기화) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -853,8 +852,8 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
-  // ✅ 수정: mk(y, m) 과 동일한 포맷("YYYY-MM")으로 캐시 데이터 조회
-  const targetMonthKey = mk(selY, selM - 1);
+  // ✅ 수정: monthKey(y, m-1) 포맷("YYYY-MM")과 정확히 일치하도록 캐시 조회 수정
+  const targetMonthKey = monthKey(selY, selM - 1).replace("month:", "");
   const targetMonthData = cache[targetMonthKey] || { days: {} };
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
@@ -872,7 +871,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr, selY, selM, selD]);
 
-  // ✅ 수정: 13월 버그를 일으키던 잘못된 월 연산을 제거하고 Date 객체 기반 7일 이동 구현
+  // ✅ 수정: 13월 버그를 완전히 방지하는 밀리초/Date 객체 기반 안전한 7일 단위 이동
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selY, selM - 1, selD);
     nextDate.setDate(nextDate.getDate() + offsetDays);
