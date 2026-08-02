@@ -839,7 +839,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (13월 버그 및 캘린더 스케줄 연동 완벽 해결) ----------
+// ---------- DailyPlannerView (13월 및 스케줄 연동 버그 완전 해결본) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -853,8 +853,8 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
-  // ✅ 수정: 캐시 키 포맷(YYYY-MM)과 정확히 일치하도록 연/월 바인딩 수정
-  const targetMonthKey = `${selY}-${pad2(selM)}`;
+  // ✅ 수정: mk(y, m) 과 동일한 포맷("YYYY-MM")으로 캐시 데이터 조회
+  const targetMonthKey = mk(selY, selM - 1);
   const targetMonthData = cache[targetMonthKey] || { days: {} };
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
@@ -872,7 +872,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr, selY, selM, selD]);
 
-  // ✅ 수정: 13월 버그를 일으키던 중복 +1 처리를 없애고 안전한 Date 객체 기반 7일 이동 구현
+  // ✅ 수정: 13월 버그를 일으키던 잘못된 월 연산을 제거하고 Date 객체 기반 7일 이동 구현
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selY, selM - 1, selD);
     nextDate.setDate(nextDate.getDate() + offsetDays);
