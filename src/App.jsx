@@ -428,7 +428,7 @@ export default function App() {
   
   const handleSelectPlannerDate = async (ds) => {
     setSelectedPlannerDate(ds);
-    const [y, m] = ds.split("-").map(Number);
+    const [y, m, d] = ds.split("-").map(Number);
     setYear(y);
     setMonth(m - 1);
     await ensureMonth(y, m - 1);
@@ -839,7 +839,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (완벽한 7일 단위 이동 및 정확한 캘린더 스케줄 연동) ----------
+// ---------- DailyPlannerView (안전한 7일 이동 및 캘린더 스케줄 연동) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -858,11 +858,11 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
-  // 이번 주 7일 생성
+  // 이번 주 7일 생성 (일요일 시작)
   const weekDates = useMemo(() => {
     const list = [];
     const curr = new Date(selDateObj);
-    const dayOfWeek = curr.getDay(); // 0(일)~6(토)
+    const dayOfWeek = curr.getDay();
     curr.setDate(curr.getDate() - dayOfWeek);
     for (let i = 0; i < 7; i++) {
       list.push(new Date(curr));
@@ -871,7 +871,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr]);
 
-  // 정확히 7일(1주일) 단위 이동
+  // 정확히 7일(1주일) 단위 이동 함수
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selDateObj);
     nextDate.setDate(nextDate.getDate() + offsetDays);
