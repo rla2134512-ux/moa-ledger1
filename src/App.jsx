@@ -838,7 +838,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (주간 이동 및 캘린더 스케줄 완벽 동기화) ----------
+// ---------- DailyPlannerView (캐시 키 포맷 일치 및 캘린더 스케줄 연동 버그 완전 해결) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -852,9 +852,9 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
-  // ✅ 수정: monthKey(y, m-1) 포맷("YYYY-MM")과 정확히 일치하도록 캐시 조회 수정
-  const targetMonthKey = monthKey(selY, selM - 1).replace("month:", "");
-  const targetMonthData = cache[targetMonthKey] || { days: {} };
+  // ✅ 수정: monthKey(y, m)의 결과("month:YYYY-MM")를 사용하여 캐시에서 정확히 데이터 조회
+  const targetMonthCacheKey = monthKey(selY, selM - 1);
+  const targetMonthData = cache[targetMonthCacheKey] || { days: {} };
   const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
@@ -871,7 +871,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     return list;
   }, [selectedDateStr, selY, selM, selD]);
 
-  // ✅ 수정: 13월 버그를 완전히 방지하는 밀리초/Date 객체 기반 안전한 7일 단위 이동
+  // ✅ 수정: 13월 버그를 완전히 방지하는 Date 객체 기반 7일 이동
   const changeWeek = (offsetDays) => {
     const nextDate = new Date(selY, selM - 1, selD);
     nextDate.setDate(nextDate.getDate() + offsetDays);
@@ -1006,7 +1006,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         })}
 
         {dateTodos.length === 0 && (
-          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "20px 0" }}>등록된 할 일이 없어요. 위 입력창에서 할 일을 추가해 보세요!</div>
+          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "20px 0" }}>등록된 할 일이 없어요. 위 입력창에서 할 일이 추가해 보세요!</div>
         )}
       </div>
     </div>
