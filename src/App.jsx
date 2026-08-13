@@ -319,7 +319,6 @@ function downloadDataUrl(filename, dataUrl) {
   const a = document.createElement("a");
   a.href = dataUrl; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 function TabButton({ active, onClick, icon: Icon, label }) {
@@ -453,6 +452,7 @@ export default function App() {
     saveTodos(next);
   };
 
+  // 할 일 순서 변경 함수 (위로 / 아래로)
   const moveTodo = (id, direction) => {
     const todos = [...(settings.todos || [])];
     const dateTodos = todos.filter((t) => t.dateStr === selectedPlannerDate);
@@ -464,12 +464,23 @@ export default function App() {
     const targetIndex = direction === "up" ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= dateTodos.length) return;
 
+    // 자리 바꾸기
     const temp = dateTodos[index];
     dateTodos[index] = dateTodos[targetIndex];
     dateTodos[targetIndex] = temp;
 
     saveTodos([...otherTodos, ...dateTodos]);
   };
+
+  const prevMonthIndex = month === 0 ? 11 : month - 1;
+  const prevMonthYear = month === 0 ? year - 1 : year;
+  const prevData = cache[monthKey(prevMonthYear, prevMonthIndex)] || { days: {} };
+  const prevGross = useMemo(() => {
+    let sum = 0;
+    Object.values(prevData.days || {}).forEach((d) => (d.entries || []).forEach((e) => { if (e.type === "income") sum += e.amount; }));
+    return sum;
+  }, [prevData]);
+  const prevNet = prevGross * (1 - taxRate);
 
   const [yearScan, setYearScan] = useState({});
   const [yearScanLoaded, setYearScanLoaded] = useState(false);
@@ -482,18 +493,16 @@ export default function App() {
       if (cancelled) return;
       const perMonth = {};
       for (let m = 1; m <= 12; m++) {
-        const data = all[monthKey(year, m - 1)];
+        const data = all[`month:${year}-${pad2(m)}`];
         let gross = 0;
-        if (data && data.days) {
-          Object.values(data.days).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
-        }
+        if (data) Object.values(data.days || {}).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
         perMonth[pad2(m)] = gross;
       }
       setYearScan(perMonth);
       setYearScanLoaded(true);
     })();
     return () => { cancelled = true; };
-  }, [tab, year, cache]);
+  }, [tab, year]);
 
   const curData = cache[monthKey(year, month)] || { days: {} };
 
@@ -522,26 +531,24 @@ export default function App() {
     let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
     const workDaySet = new Set();
     const byCat = {};
-    if (curData && curData.days) {
-      Object.entries(curData.days).forEach(([dk, d]) => (d.entries || []).forEach((e) => {
-        if (e.type === "income") {
-          gross += e.amount;
-          if (e.shift && SHIFT_SLOTS[e.shift]) {
-            workDaySet.add(dk);
-            if (COMBO_SHIFTS.has(e.shift)) {
-              countFull++;
-            } else if (e.shift === "C") {
-              countC++;
-            } else {
-              countA++;
-            }
+    Object.entries(curData.days).forEach(([dk, d]) => (d.entries || []).forEach((e) => {
+      if (e.type === "income") {
+        gross += e.amount;
+        if (e.shift && SHIFT_SLOTS[e.shift]) {
+          workDaySet.add(dk);
+          if (COMBO_SHIFTS.has(e.shift)) {
+            countFull++;
+          } else if (e.shift === "C") {
+            countC++;
+          } else {
+            countA++;
           }
-        } else {
-          if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
-          byCat[e.category] = (byCat[e.category] || 0) + e.amount;
         }
-      }));
-    }
+      } else {
+        if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
+        byCat[e.category] = (byCat[e.category] || 0) + e.amount;
+      }
+    }));
     const totalGeun = countA + countC + countFull * 2;
     return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size, totalGeun } };
   }, [curData, taxRate]);
@@ -565,14 +572,12 @@ export default function App() {
     if (!isCurrentMonth) return 0;
     const todayD = realToday.getDate();
     let sum = 0;
-    if (curData && curData.days) {
-      Object.entries(curData.days).forEach(([dk, d]) => { if (parseInt(dk, 10) <= todayD) (d.entries || []).forEach((e) => { if (e.type === "expense" && e.category !== ASSET_CAT) sum += e.amount; }); });
-    }
+    Object.entries(curData.days).forEach(([dk, d]) => { if (parseInt(dk, 10) <= todayD) (d.entries || []).forEach((e) => { if (e.type === "expense" && e.category !== ASSET_CAT) sum += e.amount; }); });
     return sum;
   }, [curData, isCurrentMonth]);
   const todaySpent = useMemo(() => {
     if (!isCurrentMonth) return 0;
-    const d = curData.days ? curData.days[pad2(realToday.getDate())] : null;
+    const d = curData.days[pad2(realToday.getDate())];
     if (!d) return 0;
     return d.entries.filter((e) => e.type === "expense" && e.category !== ASSET_CAT).reduce((a, e) => a + e.amount, 0);
   }, [curData, isCurrentMonth]);
@@ -627,7 +632,7 @@ export default function App() {
     const list = [];
     for (let d = 1; d <= dim; d++) {
       const dk = pad2(d);
-      const dayObj = curData.days ? curData.days[dk] : null;
+      const dayObj = curData.days[dk];
       const wdLabel = WEEK_LABELS[new Date(year, month, d).getDay()];
       if (dayObj && dayObj.label === "휴무") {
         list.push(`${month + 1}/${d}(${wdLabel}) 휴무`);
@@ -709,14 +714,12 @@ export default function App() {
     const rows = [["날짜", "유형", "카테고리", "조", "금액", "메모"]];
     Object.entries(months).sort().forEach(([key, data]) => {
       const ym = key.replace("month:", "");
-      if (data && data.days) {
-        Object.entries(data.days).forEach(([dk, dayObj]) => {
-          (dayObj.entries || []).forEach((e) => {
-            const memo = (e.memo || "").replace(/"/g, "'");
-            rows.push([`${ym}-${dk}`, e.type === "income" ? "수입" : "지출", e.category, e.shift ? SHIFT_INFO[e.shift]?.label || "" : "", e.amount, `"${memo}"`]);
-          });
+      Object.entries(data.days || {}).forEach(([dk, dayObj]) => {
+        (dayObj.entries || []).forEach((e) => {
+          const memo = (e.memo || "").replace(/"/g, "'");
+          rows.push([`${ym}-${dk}`, e.type === "income" ? "수입" : "지출", e.category, e.shift ? SHIFT_INFO[e.shift]?.label || "" : "", e.amount, `"${memo}"`]);
         });
-      }
+      });
     });
     const csv = "\uFEFF" + rows.map((r) => r.join(",")).join("\n");
     downloadText(`모으다_${realToday.getFullYear()}_증빙.csv`, "text/csv;charset=utf-8", csv);
@@ -724,7 +727,7 @@ export default function App() {
   };
   const saveWallpaper = () => {
     try {
-      const dataUrl = generateCalendarPNG(year, month, curData.days || {});
+      const dataUrl = generateCalendarPNG(year, month, curData.days);
       downloadDataUrl(`모으다_${year}${pad2(month + 1)}_배경화면.png`, dataUrl);
       setToast("배경화면 이미지를 저장했어요");
     } catch (e) { console.error(e); setToast("이미지 생성에 실패했어요"); }
@@ -766,7 +769,7 @@ export default function App() {
           <>
             {tab === "calendar" && (
               <CalendarView
-                year={year} month={month} changeMonth={changeMonth} daysData={curData.days || {}}
+                year={year} month={month} changeMonth={changeMonth} daysData={curData.days}
                 onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopyOffDays={copyOffDaysText}
                 onOpenImportModal={() => setImportModalOpen(true)}
               />
@@ -810,7 +813,7 @@ export default function App() {
         {selectedDay && (
           <DayModal
             year={year} month={month} day={selectedDay}
-            dayObj={curData.days ? curData.days[pad2(selectedDay)] || emptyDay() : emptyDay()}
+            dayObj={curData.days[pad2(selectedDay)] || emptyDay()}
             settings={settings}
             onClose={() => setSelectedDay(null)}
             onAdd={(entry) => addEntry(selectedDay, entry)}
@@ -856,22 +859,27 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView ----------
+// ---------- DailyPlannerView (캘린더 스케줄 실시간 연동 및 순서 변경 구현) ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo, onMoveTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
 
   const [selY, selM, selD] = selectedDateStr.split("-").map((x) => parseInt(x, 10));
-  
+  const selDateObj = new Date(selY, selM - 1, selD);
+  const selWd = WEEK_LABELS[selDateObj.getDay()];
+
+  // 선택된 날짜의 연/월 데이터를 확실하게 로드
   useEffect(() => {
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
+  // ✅ 캘린더 데이터와 정확히 매칭되는 키로 해당 일자 스케줄 조회
   const targetMonthKey = monthKey(selY, selM - 1);
   const targetMonthData = cache[targetMonthKey] || { days: {} };
-  const selDayData = targetMonthData.days ? targetMonthData.days[pad2(selD)] || emptyDay() : emptyDay();
+  const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
+  // 이번 주 7일 생성 (일요일 시작)
   const weekDates = useMemo(() => {
     const list = [];
     const curr = new Date(selY, selM - 1, selD);
@@ -903,9 +911,10 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
     <div style={{ padding: "16px 20px 100px" }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: GOLD, letterSpacing: 1, marginBottom: 2 }}>TODAY PLANNER</div>
       <div className="display" style={{ fontSize: 24, fontWeight: 700, marginBottom: 14 }}>
-        {selM}월 {selD}일 ({WEEK_LABELS[new Date(selY, selM - 1, selD).getDay()]})
+        {selM}월 {selD}일 ({selWd})
       </div>
 
+      {/* 상단 주간 이동 버튼 및 달력 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "10px 8px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, padding: "0 4px" }}>
           <button onClick={() => changeWeek(-7)} style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 2 }}>
@@ -921,6 +930,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
           {weekDates.map((d, i) => {
             const ds = dateStrKey(d.getFullYear(), d.getMonth(), d.getDate());
             const isSel = ds === selectedDateStr;
+            const isRealToday = ds === dateStrKey(realToday.getFullYear(), realToday.getMonth(), realToday.getDate());
             return (
               <button
                 key={i}
@@ -931,7 +941,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
                 }}
               >
                 <span style={{ fontSize: 10, color: i === 0 ? EXPENSE : i === 6 ? INDIGO : MUTED, fontWeight: 600 }}>{WEEK_LABELS[i]}</span>
-                <span className="mono" style={{ fontSize: 13.5, fontWeight: isSel ? 700 : 500, color: INK, marginTop: 2 }}>
+                <span className="mono" style={{ fontSize: 13.5, fontWeight: isSel || isRealToday ? 700 : 500, color: isRealToday ? GOLD : INK, marginTop: 2 }}>
                   {d.getDate()}
                 </span>
               </button>
@@ -940,6 +950,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         </div>
       </div>
 
+      {/* 캘린더 스케줄 실시간 연동 카드 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
         {workEntries.length > 0 ? (
@@ -956,6 +967,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         )}
       </div>
 
+      {/* 카테고리 태그 및 할 일 체크리스트 (순서 변경 버튼 포함) */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>카테고리 선택</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -1005,6 +1017,8 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
                         {item.text}
                       </span>
                     </button>
+                    
+                    {/* 순서 변경 및 삭제 버튼 */}
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <button onClick={() => onMoveTodo(item.id, "up")} disabled={idx === 0} style={{ padding: 2, background: "transparent", border: "none", cursor: idx === 0 ? "not-allowed" : "pointer", opacity: idx === 0 ? 0.3 : 1 }}><ChevronUp size={15} color={INK} /></button>
                       <button onClick={() => onMoveTodo(item.id, "down")} disabled={idx === catTodos.length - 1} style={{ padding: 2, background: "transparent", border: "none", cursor: idx === catTodos.length - 1 ? "not-allowed" : "pointer", opacity: idx === catTodos.length - 1 ? 0.3 : 1 }}><ChevronDown size={15} color={INK} /></button>
@@ -1016,6 +1030,570 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
             </div>
           );
         })}
+
+        {dateTodos.length === 0 && (
+          <div style={{ fontSize: 12, color: MUTED, textAlign: "center", padding: "20px 0" }}>등록된 할 일이 없어요. 위 입력창에서 할 일을 추가해 보세요!</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Install Banner ----------
+function InstallBanner() {
+  const [visible, setVisible] = useState(false);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    (async () => {
+      let dismissed = false;
+      try {
+        if (window.storage && window.storage.get) {
+          const res = await window.storage.get("installBannerDismissed", false);
+          dismissed = !!(res && res.value === "1");
+        } else {
+          dismissed = localStorage.getItem("installBannerDismissed") === "1";
+        }
+      } catch (e) { }
+      const isStandalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      setVisible(!dismissed && !isStandalone && isMobile);
+      setReady(true);
+    })();
+  }, []);
+  const dismiss = async () => {
+    setVisible(false);
+    try {
+      if (window.storage && window.storage.set) {
+        await window.storage.set("installBannerDismissed", "1", false);
+      } else {
+        localStorage.setItem("installBannerDismissed", "1");
+      }
+    } catch (e) { }
+  };
+  if (!ready || !visible) return null;
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return (
+    <div style={{ margin: "14px 14px 0", background: INK, color: "#fff", borderRadius: 14, padding: "14px 16px", boxShadow: "0 4px 14px rgba(0,0,0,0.12)" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <Smartphone size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>홈 화면에 추가하세요</div>
+          <div style={{ fontSize: 11, opacity: 0.85, lineHeight: 1.45 }}>
+            {isIOS ? "Safari 공유 버튼 → '홈 화면에 추가'를 누르면 아이콘처럼 켤 수 있어요." : "브라우저 메뉴 → '홈 화면에 추가'를 선택하면 아이콘처럼 켤 수 있어요."}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button onClick={dismiss} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)", background: "transparent", color: "#fff", fontSize: 12, cursor: "pointer" }}>닫기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- CalendarView ----------
+function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal }) {
+  const dim = daysInMonth(year, month);
+  const fw = firstWeekday(year, month);
+  const cells = [];
+  for (let i = 0; i < fw; i++) cells.push(null);
+  for (let d = 1; d <= dim; d++) cells.push(d);
+  const isToday = (d) => { const t = new Date(); return d === t.getDate() && month === t.getMonth() && year === t.getFullYear(); };
+
+  return (
+    <div style={{ padding: "14px 14px 100px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button onClick={() => changeMonth(-1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronLeft size={20} color={INK} /></button>
+        <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>{year}년 {month + 1}월</div>
+        <button onClick={() => changeMonth(1)} style={{ padding: 8, background: "transparent", border: "none" }}><ChevronRight size={20} color={INK} /></button>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <button onClick={onOpenImportModal} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, border: `1.3px solid ${INDIGO}`, color: INDIGO, background: "transparent", borderRadius: 12, padding: "8px 0", fontWeight: 700, fontSize: 11.5 }}>
+          <FileText size={14} /> 스케줄 스캔
+        </button>
+        <button onClick={onSaveWallpaper} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, border: `1.3px solid ${GOLD}`, color: GOLD, background: "transparent", borderRadius: 12, padding: "8px 0", fontWeight: 700, fontSize: 11.5 }}>
+          <Camera size={14} /> 배경화면 저장
+        </button>
+        <button onClick={onCopyOffDays} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, border: `1.3px solid ${EXPENSE}`, color: EXPENSE, background: "transparent", borderRadius: 12, padding: "8px 0", fontWeight: 700, fontSize: 11.5 }}>
+          <Share2 size={14} /> 휴무일 복사
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", marginBottom: 6 }}>
+        {WEEK_LABELS.map((w) => <div key={w} style={{ textAlign: "center", fontSize: 11, color: MUTED, fontWeight: 600, padding: "4px 0" }}>{w}</div>)}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 5, width: "100%", boxSizing: "border-box" }}>
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} style={{ minHeight: 92 }} />;
+          const dk = pad2(d);
+          const dayObj = daysData[dk];
+          const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
+          const conflict = dayObj ? computeConflict(dayObj.entries) : false;
+          const hasContent = !!(dayObj && (dayObj.entries.length || dayObj.label));
+          const wd = new Date(year, month, d).getDay();
+
+          return (
+            <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
+              minHeight: 92, width: "100%", boxSizing: "border-box",
+              border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
+              borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
+              alignItems: "flex-start", justifyContent: "flex-start", padding: "6px 5px", position: "relative", textAlign: "left",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                <span className="mono" style={{ fontSize: 13, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
+                  {d}
+                </span>
+                {dayObj?.label && <span style={{ width: 7, height: 7, borderRadius: 7, background: labelColorOf(dayObj.label), flexShrink: 0 }} />}
+              </div>
+
+              <div style={{ marginTop: 4, width: "100%", lineHeight: 1.25, wordBreak: "break-all" }}>
+                {conflict ? (
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: EXPENSE }}>⚠️ 시간대 중복</div>
+                ) : work.length ? (
+                  <>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: storeColor(work[0].category), lineHeight: 1.2 }}>
+                      {work[0].category}
+                    </div>
+                    <div className="mono" style={{ fontSize: 11, fontWeight: 700, color: SHIFT_INFO[work[0].shift]?.color, marginTop: 2 }}>
+                      {SHIFT_INFO[work[0].shift]?.label}{work.length > 1 ? ` 외${work.length - 1}` : ""}
+                    </div>
+                  </>
+                ) : dayObj?.label ? (
+                  <>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: labelColorOf(dayObj.label) }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 9.5, color: MUTED }}>{dayObj.memo}</div>}
+                  </>
+                ) : null}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
+        {LABELS.map((l) => (<div key={l.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: MUTED }}><span style={{ width: 6, height: 6, borderRadius: 6, background: l.color, display: "inline-block" }} />{l.key}</div>))}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: MUTED, textAlign: "center" }}>날짜를 눌러 근무·지출·일정을 기록하세요 · 왼쪽으로 스와이프하면 오늘 플래너가 열려요</div>
+    </div>
+  );
+}
+
+// ---------- ScheduleImportModal ----------
+function ScheduleImportModal({ onClose, onImportBatch, settings }) {
+  const [userName, setUserName] = useState("선형윤");
+  const [storeName, setStoreName] = useState("T2 불가리팝업");
+  const [file, setFile] = useState(null);
+  const [parsedPreview, setParsedPreview] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileRef = useRef(null);
+
+  const normalizeShift = (val) => {
+    if (!val) return null;
+    const str = String(val).trim().toUpperCase().replace(/\s+/g, "");
+    if (str === "OFF" || str === "휴무" || str === "휴") return "OFF";
+    if (str.includes("A1/C") || str.includes("A1C")) return "A1C";
+    if (str.includes("A2/C") || str.includes("A2C")) return "A2C";
+    if (str.includes("A/C") || str.includes("AC")) return "AC";
+    if (str === "A1") return "A1";
+    if (str === "A2") return "A2";
+    if (str === "A" || str === "A조") return "A";
+    if (str === "C" || str === "C조") return "C";
+    return null;
+  };
+
+  const handleFileChange = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setErrorMsg("");
+    setParsedPreview(null);
+
+    const isExcel = f.name.endsWith(".xlsx") || f.name.endsWith(".xls") || f.name.endsWith(".csv");
+    if (!isExcel) {
+      setErrorMsg("사진 파싱은 현재 엑셀(.xlsx) 파일 스캔만 지원합니다. 엑셀 스케줄표 파일을 선택해 주세요!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+        if (!data || data.length === 0) {
+          setErrorMsg("엑셀 파일이 비어 있거나 내용을 읽을 수 없습니다.");
+          return;
+        }
+
+        const nameKey = userName.trim();
+        if (!nameKey) {
+          setErrorMsg("찾으실 유저 이름(예: 선형윤)을 먼저 입력해 주세요.");
+          return;
+        }
+
+        const mapResult = {};
+        let foundUser = false;
+
+        let nameColIndex = -1;
+        let dayColIndex = -1;
+        let headerRowIndex = -1;
+
+        for (let r = 0; r < Math.min(data.length, 10); r++) {
+          const row = data[r];
+          for (let c = 0; c < row.length; c++) {
+            const cellVal = String(row[c]).trim();
+            if (cellVal === nameKey) {
+              nameColIndex = c;
+              headerRowIndex = r;
+              foundUser = true;
+            }
+            if (cellVal.includes("일") || cellVal.includes("날짜") || cellVal === "1") {
+              dayColIndex = c;
+            }
+          }
+          if (foundUser) break;
+        }
+
+        if (foundUser && nameColIndex !== -1) {
+          for (let r = headerRowIndex + 1; r < data.length; r++) {
+            const row = data[r];
+            if (!row) continue;
+            const dayCell = String(row[dayColIndex >= 0 ? dayColIndex : 0]).replace(/[^0-9]/g, "");
+            const dayNum = parseInt(dayCell, 10);
+            if (dayNum >= 1 && dayNum <= 31) {
+              const shiftVal = normalizeShift(row[nameColIndex]);
+              if (shiftVal) mapResult[dayNum] = shiftVal;
+            }
+          }
+        } else {
+          for (let r = 0; r < data.length; r++) {
+            const row = data[r];
+            if (!row || row.length === 0) continue;
+            const firstCell = String(row[0]).replace(/[^0-9]/g, "");
+            const dayNum = parseInt(firstCell, 10);
+            if (dayNum >= 1 && dayNum <= 31) {
+              for (let c = 1; c < row.length; c++) {
+                const cellVal = String(row[c]).trim();
+                if (cellVal.includes(nameKey)) {
+                  foundUser = true;
+                  const headerShift = normalizeShift(data[0]?.[c] || data[1]?.[c]);
+                  if (headerShift) mapResult[dayNum] = headerShift;
+                }
+              }
+            }
+          }
+        }
+
+        if (!foundUser || Object.keys(mapResult).length === 0) {
+          setErrorMsg(`엑셀 표 안에서 '${nameKey}' 님의 스케줄을 찾지 못했습니다. 이름이 정확히 일치하는지 확인해 주세요.`);
+        } else {
+          setParsedPreview(mapResult);
+        }
+      } catch (err) {
+        console.error(err);
+        setErrorMsg("엑셀 파일 해석 중 오류가 발생했습니다.");
+      }
+    };
+    reader.readAsBinaryString(f);
+  };
+
+  const applyImport = () => {
+    if (!parsedPreview) return;
+    onImportBatch(parsedPreview, storeName.trim() || "스캔 매장");
+    onClose();
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 60 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out", maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>스케줄표 자동 스캔</div>
+          <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none" }}><X size={20} color={MUTED} /></button>
+        </div>
+        <TornEdge color={CARD} />
+
+        <div style={{ padding: "12px 20px 30px" }}>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 14, lineHeight: 1.5 }}>
+            매장 엑셀 근무표(.xlsx)를 업로드하면 표 구조를 분석해 '내 이름'에 해당하는 한 달 치 근무 조를 자동으로 달력에 기입해 줍니다.
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>찾을 유저 이름</div>
+              <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="예: 선형윤" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13 }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록할 매장명</div>
+              <input value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="예: T2 불가리팝업" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13 }} />
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>스케줄 엑셀 파일</div>
+          <button onClick={() => fileRef.current?.click()} style={{ width: "100%", border: `1.5px dashed ${INDIGO}`, borderRadius: 12, padding: "16px 0", textAlign: "center", background: "#FCFAF5", cursor: "pointer", marginBottom: 14 }}>
+            <Upload size={20} color={INDIGO} style={{ margin: "0 auto 6px" }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: INK }}>{file ? file.name : "엑셀(.xlsx) 파일 선택하기"}</div>
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>불가리, 크리드, C&P 등 백화점 근무표 자동 인식</div>
+          </button>
+          <input ref={fileRef} type="file" accept=".xlsx, .xls, .csv" style={{ display: "none" }} onChange={handleFileChange} />
+
+          {errorMsg && (
+            <div style={{ background: "#FBEAE6", border: `1px solid ${EXPENSE}`, borderRadius: 10, padding: "10px 12px", fontSize: 12, color: EXPENSE, marginBottom: 14 }}>
+              {errorMsg}
+            </div>
+          )}
+
+          {parsedPreview && (
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 12, marginBottom: 16, background: "#FFF" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: INCOME, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                <Check size={14} /> 스캔 완료! ({Object.keys(parsedPreview).length}일 치 스케줄 추출됨)
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 110, overflowY: "auto" }}>
+                {Object.entries(parsedPreview).map(([d, sKey]) => (
+                  <span key={d} style={{ fontSize: 11, background: PAPER, padding: "3px 7px", borderRadius: 6, color: INK }}>
+                    {d}일: <strong>{SHIFT_INFO[sKey]?.label || sKey}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={applyImport} disabled={!parsedPreview} style={{ width: "100%", background: parsedPreview ? INK : MUTED, color: "#fff", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 14, cursor: parsedPreview ? "pointer" : "not-allowed" }}>
+            내 달력에 스케줄 일괄 반영하기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- DayModal ----------
+function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo }) {
+  const [amount, setAmount] = useState("");
+  const [cat, setCat] = useState(EXPENSE_CATS[0].key);
+  const [memo, setMemo] = useState("");
+  const [dayMemo, setDayMemo] = useState(dayObj.memo || "");
+  const [hours, setHours] = useState("8");
+  const [units, setUnits] = useState("1");
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [otherAmt, setOtherAmt] = useState("");
+  const [otherMemo, setOtherMemo] = useState("");
+
+  const [todoInput, setTodoInput] = useState("");
+  const [selCatId, setSelCatId] = useState(settings.todoCats?.[0]?.id || "c1");
+
+  const dateStr = dateStrKey(year, month, day);
+  const dateTodos = (todos || []).filter((t) => t.dateStr === dateStr);
+  const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
+
+  const hiddenStores = settings.hiddenStores || [];
+  const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
+  const activeCustoms = (settings.customStores || []).filter((s) => !hiddenStores.includes(s.name));
+  const allStores = [...activeDefaults, ...activeCustoms];
+
+  const [store, setStore] = useState(allStores[0]?.name || "");
+  const [customStore, setCustomStore] = useState("");
+  const [useCustomStore, setUseCustomStore] = useState(false);
+  const [saveAsPreset, setSaveAsPreset] = useState(true);
+  const [shift, setShift] = useState("A");
+  const entries = dayObj.entries || [];
+  const conflict = computeConflict(entries);
+
+  const quickIncome = (label, amt, m = "") => onAdd({ id: uid(), type: "income", category: label, amount: amt, memo: m });
+  const addExpense = () => {
+    const n = parseInt(amount.replace(/[^0-9]/g, ""), 10);
+    if (!n) return;
+    onAdd({ id: uid(), type: "expense", category: cat, amount: n, memo });
+    setAmount(""); setMemo("");
+  };
+  const addOtherIncome = () => {
+    const n = parseInt(otherAmt.replace(/[^0-9]/g, ""), 10);
+    if (!n) return;
+    onAdd({ id: uid(), type: "income", category: "기타수입", amount: n, memo: otherMemo });
+    setOtherAmt(""); setOtherMemo(""); setOtherOpen(false);
+  };
+  const pickLabel = (key) => onMeta({ label: dayObj.label === key ? null : key });
+  const blurDayMemo = () => { if (dayMemo !== (dayObj.memo || "")) onMeta({ memo: dayMemo }); };
+
+  const handleAddTodoSubmit = () => {
+    if (!todoInput.trim()) return;
+    onAddTodo(todoInput, selCatId);
+    setTodoInput("");
+  };
+
+  const workType = settings.workType || "fixed";
+  const hourlyPreview = (parseFloat(hours) || 0) * (settings.hourlyRate || DEFAULT_HOURLY);
+  const dailyPreview = (parseFloat(units) || 0) * (settings.dailyRate || DEFAULT_DAILY);
+
+  const registerShift = () => {
+    let storeName = store;
+    if (useCustomStore) {
+      storeName = customStore.trim() || "직접입력 매장";
+      if (saveAsPreset && onAddStorePreset) onAddStorePreset(storeName);
+    }
+    const amt = COMBO_SHIFTS.has(shift) ? (settings.fixedRates?.two || TWO_SHIFT) : (settings.fixedRates?.one || ONE_SHIFT);
+    onAdd({ id: uid(), type: "income", category: storeName, shift, amount: amt, memo: "" });
+    if (useCustomStore) { setUseCustomStore(false); setStore(storeName); setCustomStore(""); }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out" }}>
+        <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>{year}.{pad2(month + 1)}.{pad2(day)}</div>
+          <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none" }}><X size={20} color={MUTED} /></button>
+        </div>
+        <TornEdge color={CARD} />
+
+        <div style={{ padding: "8px 20px 24px" }}>
+          {conflict && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#FBEAE6", border: `1px solid ${EXPENSE}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+              <AlertTriangle size={16} color={EXPENSE} style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: EXPENSE, fontWeight: 600 }}>⚠️ 시간대 중복 출근 — 같은 시간대에 근무가 두 건 이상 등록되어 있어요</span>
+            </div>
+          )}
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>오늘 라벨</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {LABELS.map((l) => (
+              <button key={l.key} onClick={() => pickLabel(l.key)} style={{ padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${dayObj.label === l.key ? l.color : PAPER_LINE}`, background: dayObj.label === l.key ? l.color : "transparent", color: dayObj.label === l.key ? "#fff" : INK }}>{l.key}</button>
+            ))}
+          </div>
+          <input placeholder="오늘의 메모 (예: 면접 2차 통과)" value={dayMemo} onChange={(e) => setDayMemo(e.target.value)} onBlur={blurDayMemo}
+            style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 20 }} />
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>이 날 할 일(To-Do) 미리 등록</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <select value={selCatId} onChange={(e) => setSelCatId(e.target.value)} style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "0 8px", fontSize: 12, background: PAPER }}>
+              {todoCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input placeholder="할 일 입력" value={todoInput} onChange={(e) => setTodoInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleAddTodoSubmit(); }} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13 }} />
+            <button onClick={handleAddTodoSubmit} style={{ background: INDIGO, color: "#fff", border: "none", borderRadius: 10, padding: "0 12px", fontWeight: 700, fontSize: 12 }}>추가</button>
+          </div>
+
+          {dateTodos.length > 0 && (
+            <div style={{ marginBottom: 20, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 12px" }}>
+              {dateTodos.map((t) => (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
+                  <span onClick={() => onToggleTodo(t.id)} style={{ fontSize: 12.5, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK, cursor: "pointer" }}>
+                    {t.done ? "●" : "○"} {t.text}
+                  </span>
+                  <button onClick={() => onDeleteTodo(t.id)} style={{ padding: 2, background: "transparent", border: "none" }}><Trash2 size={13} color="#C9BFA8" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>수입 입력</div>
+
+          {workType === "fixed" && (
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>매장</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {allStores.map((s) => (
+                  <button key={s.name} onClick={() => { setStore(s.name); setUseCustomStore(false); }} style={{ padding: "6px 10px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${!useCustomStore && store === s.name ? s.color : PAPER_LINE}`, background: !useCustomStore && store === s.name ? s.color : "transparent", color: !useCustomStore && store === s.name ? "#fff" : INK }}>{s.name}</button>
+                ))}
+                <button onClick={() => setUseCustomStore(true)} style={{ padding: "6px 10px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${useCustomStore ? INDIGO : PAPER_LINE}`, background: useCustomStore ? INDIGO : "transparent", color: useCustomStore ? "#fff" : INK }}>+ 직접입력</button>
+              </div>
+              {useCustomStore && (
+                <div style={{ marginBottom: 10 }}>
+                  <input placeholder="매장명 직접 입력" value={customStore} onChange={(e) => setCustomStore(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, marginBottom: 6 }} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: MUTED }}>
+                    <input type="checkbox" checked={saveAsPreset} onChange={(e) => setSaveAsPreset(e.target.checked)} />
+                    이 매장 프리셋에 저장해두기 (다음에 바로 선택 가능)
+                  </label>
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>근무 조</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 10 }}>
+                {Object.entries(SHIFT_INFO).map(([key, info]) => (
+                  <button key={key} onClick={() => setShift(key)} className="mono" style={{ padding: "8px 2px", borderRadius: 10, border: `1.3px solid ${shift === key ? info.color : PAPER_LINE}`, background: shift === key ? info.color : "transparent", color: shift === key ? "#fff" : INK, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>{info.label}</span>
+                    {info.time && (
+                      <span style={{ fontSize: 9, opacity: shift === key ? 0.9 : 0.6, marginTop: 1, fontWeight: 500 }}>
+                        {info.time}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 10 }}>단일 조(A·A1·A2·C)는 1근, 조합 조(A/C·A1/C·A2/C)는 2근으로 계산돼요</div>
+              <button onClick={registerShift} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>근무 등록</button>
+            </div>
+          )}
+
+          {workType === "hourly" && (
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: "#6B6455" }}>근무 시간</span>
+                <input inputMode="decimal" value={hours} onChange={(e) => setHours(e.target.value)} className="mono" style={{ width: 64, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 14, textAlign: "center" }} />
+                <span style={{ fontSize: 13, color: "#6B6455" }}>시간 × {won(settings.hourlyRate || DEFAULT_HOURLY)}</span>
+              </div>
+              <button onClick={() => quickIncome("근무(시급제)", Math.round(hourlyPreview), `${hours}시간`)} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>등록</button>
+            </div>
+          )}
+
+          {workType === "daily" && (
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: "#6B6455" }}>공수</span>
+                <input inputMode="decimal" value={units} onChange={(e) => setUnits(e.target.value)} className="mono" style={{ width: 64, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 14, textAlign: "center" }} />
+                <span style={{ fontSize: 13, color: "#6B6455" }}>× {won(settings.dailyRate || DEFAULT_DAILY)}</span>
+              </div>
+              <button onClick={() => quickIncome("근무(일급제)", Math.round(dailyPreview), `${units}공수`)} style={{ width: "100%", background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 14 }}>등록</button>
+            </div>
+          )}
+
+          {!otherOpen ? (
+            <button onClick={() => setOtherOpen(true)} style={{ fontSize: 12, color: INDIGO, fontWeight: 700, marginBottom: 18, background: "transparent", border: "none" }}>+ 기타 수입 추가</button>
+          ) : (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <input inputMode="numeric" placeholder="금액" value={otherAmt} onChange={(e) => setOtherAmt(e.target.value)} className="mono" style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 14 }} />
+                <button onClick={addOtherIncome} style={{ background: INCOME, color: "#fff", border: "none", borderRadius: 10, padding: "0 16px" }}><Plus size={18} /></button>
+              </div>
+              <input placeholder="메모 (예: 팁, 보너스)" value={otherMemo} onChange={(e) => setOtherMemo(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13 }} />
+            </div>
+          )}
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>지출 / 저축 추가</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {EXPENSE_CATS.map((c) => (
+              <button key={c.key} onClick={() => setCat(c.key)} style={{ padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${cat === c.key ? c.color : PAPER_LINE}`, background: cat === c.key ? c.color : "transparent", color: cat === c.key ? "#fff" : INK }}>{c.key}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <input inputMode="numeric" placeholder="금액" value={amount} onChange={(e) => setAmount(e.target.value)} className="mono" style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "10px 12px", fontSize: 14 }} />
+            <button onClick={addExpense} style={{ background: EXPENSE, color: "#fff", border: "none", borderRadius: 10, padding: "0 16px" }}><Plus size={18} /></button>
+          </div>
+          <input placeholder="메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 18 }} />
+
+          {entries.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>오늘 기록</div>
+              {entries.map((e) => (
+                <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                      {e.shift && <span style={{ width: 6, height: 6, borderRadius: 6, background: storeColor(e.category), display: "inline-block" }} />}
+                      {e.category}
+                      {e.shift && <span style={{ fontSize: 10.5, color: SHIFT_INFO[e.shift]?.color, fontWeight: 700 }}>· {SHIFT_INFO[e.shift]?.label}</span>}
+                      {e.recurringId && <span style={{ fontSize: 10, color: GOLD }}>고정</span>}
+                    </div>
+                    {e.memo && <div style={{ fontSize: 11, color: MUTED }}>{e.memo}</div>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: e.type === "income" ? INCOME : EXPENSE }}>{e.type === "income" ? "+" : "-"}{won(e.amount)}</span>
+                    <button onClick={() => onDelete(e.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={15} color="#C9BFA8" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
