@@ -1623,7 +1623,6 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-// ---------- Report ----------
 function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday, prevNet }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
@@ -1631,19 +1630,23 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
 
   const prevMonthNum = month === 0 ? 12 : month;
 
+  // [수정된 급여일 카운트다운 로직]
   const currentToday = new Date();
-  const targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
-  if (currentToday.getDate() > payday) {
-    targetPayday.setMonth(targetPayday.getMonth() + 1);
-  }
-  const diffDays = Math.ceil((targetPayday - currentToday) / (1000 * 60 * 60 * 24));
+  const targetDate = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
+  const nextTarget = currentToday.getDate() > payday 
+    ? new Date(currentToday.getFullYear(), currentToday.getMonth() + 1, payday)
+    : targetDate;
+  
+  const diffTime = nextTarget - currentToday;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const displayMonth = nextTarget.getMonth() + 1;
 
   return (
     <div style={{ padding: "16px 20px 100px" }}>
       <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-            <span>💰</span> {prevMonthNum}월 근무 급여 입금일 (매달 {payday}일)
+            <span>💰</span> {displayMonth}월 급여 입금일 (매달 {payday}일)
           </div>
           <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
             {diffDays === 0 ? "D-DAY 🎉" : `D-${diffDays}`}
