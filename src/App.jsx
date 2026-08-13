@@ -28,12 +28,9 @@ const DEFAULT_HOURLY = 12000;
 const DEFAULT_DAILY = 130000;
 
 const EXPENSE_CATS = [
-  { key: "식비", color: "#B5432E" },
-  { key: "쇼핑", color: "#C77B4A" },
-  { key: "교통", color: "#8C7A5B" },
-  { key: "고정비", color: "#6B5B4A" },
-  { key: "적금/투자", color: "#0F6B5C" },
-  { key: "기타", color: "#9A9284" },
+  { key: "식비", color: "#B5432E" }, { key: "쇼핑", color: "#C77B4A" },
+  { key: "교통", color: "#8C7A5B" }, { key: "고정비", color: "#6B5B4A" },
+  { key: "적금/투자", color: "#0F6B5C" }, { key: "기타", color: "#9A9284" },
 ];
 const ASSET_CAT = "적금/투자";
 const FIXED_CAT = "고정비";
@@ -47,10 +44,8 @@ const DEFAULT_TODO_CATS = [
 ];
 
 const LABELS = [
-  { key: "휴무", color: "#6B7A8F" },
-  { key: "면접", color: "#3B5BA5" },
-  { key: "스터디", color: "#0F6B5C" },
-  { key: "알바", color: "#B08D57" },
+  { key: "휴무", color: "#6B7A8F" }, { key: "면접", color: "#3B5BA5" },
+  { key: "스터디", color: "#0F6B5C" }, { key: "알바", color: "#B08D57" },
   { key: "기타", color: "#9A9284" },
 ];
 
@@ -121,8 +116,7 @@ const DEFAULT_SETTINGS = {
   hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
   customStores: [], hiddenStores: [],
   todoCats: DEFAULT_TODO_CATS,
-  routines: [], 
-  todos: [], 
+  routines: [], todos: [], 
 };
 
 async function loadMonth(y, m) {
@@ -207,7 +201,7 @@ function applyRecurringToMonth(year, month, monthData, recurringList, realToday)
   if (!isPastMonth && !isCurrentMonth) return { data: monthData, changed: false };
 
   let changed = false;
-  const days = { ...monthData.days };
+  const days = { ...(monthData.days || {}) };
   recurringList.forEach((item) => {
     if (!item.active) return;
     const day = clampDay(item.day, dim);
@@ -272,7 +266,7 @@ function generateCalendarPNG(year, month, daysData) {
     ctx.strokeRect(x + 6, y + 4, cellW - 12, cellH - 12);
 
     const dk = pad2(d);
-    const dayObj = daysData[dk];
+    const dayObj = (daysData || {})[dk];
     const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
     const conflict = dayObj ? computeConflict(dayObj.entries) : false;
 
@@ -412,7 +406,7 @@ export default function App() {
     let existing = cacheRef.current[k];
     if (!existing) {
       const data = await loadMonth(y, m);
-      const { data: applied, changed } = applyRecurringToMonth(y, m, data, settings.recurring || [], new Date());
+      const { data: applied, changed } = applyRecurringToMonth(y, m, data || { days: {} }, settings.recurring || [], new Date());
       cacheRef.current = { ...cacheRef.current, [k]: applied };
       setCache((prev) => ({ ...prev, [k]: applied }));
       if (changed) await saveMonth(y, m, applied);
@@ -422,7 +416,6 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
-  
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
   
   const handleSelectPlannerDate = async (ds) => {
@@ -452,7 +445,6 @@ export default function App() {
     saveTodos(next);
   };
 
-  // 할 일 순서 변경 함수 (위로 / 아래로)
   const moveTodo = (id, direction) => {
     const todos = [...(settings.todos || [])];
     const dateTodos = todos.filter((t) => t.dateStr === selectedPlannerDate);
@@ -464,7 +456,6 @@ export default function App() {
     const targetIndex = direction === "up" ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= dateTodos.length) return;
 
-    // 자리 바꾸기
     const temp = dateTodos[index];
     dateTodos[index] = dateTodos[targetIndex];
     dateTodos[targetIndex] = temp;
@@ -484,6 +475,8 @@ export default function App() {
 
   const [yearScan, setYearScan] = useState({});
   const [yearScanLoaded, setYearScanLoaded] = useState(false);
+  
+  // ✅ [흰 화면 방지] 정산/분석 탭에서 yearScan 안전하게 집계
   useEffect(() => {
     if (tab !== "report" && tab !== "analysis") return;
     let cancelled = false;
@@ -493,16 +486,18 @@ export default function App() {
       if (cancelled) return;
       const perMonth = {};
       for (let m = 1; m <= 12; m++) {
-        const data = all[`month:${year}-${pad2(m)}`];
+        const data = all[monthKey(year, m - 1)];
         let gross = 0;
-        if (data) Object.values(data.days || {}).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
+        if (data && data.days) {
+          Object.values(data.days).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
+        }
         perMonth[pad2(m)] = gross;
       }
       setYearScan(perMonth);
       setYearScanLoaded(true);
     })();
     return () => { cancelled = true; };
-  }, [tab, year]);
+  }, [tab, year, cache]);
 
   const curData = cache[monthKey(year, month)] || { days: {} };
 
@@ -516,39 +511,41 @@ export default function App() {
     const k = monthKey(year, month);
     const data = cache[k] || { days: {} };
     const dk = pad2(dayNum);
-    const dayObj = data.days[dk] || emptyDay();
+    const dayObj = (data.days || {})[dk] || emptyDay();
     const nextDay = mutator(dayObj);
-    const next = { ...data, days: { ...data.days, [dk]: nextDay } };
+    const next = { ...data, days: { ...(data.days || {}), [dk]: nextDay } };
     setCache((prev) => ({ ...prev, [k]: next }));
     await saveMonth(year, month, next);
   };
 
-  const addEntry = (dayNum, entry) => mutateDay(dayNum, (d) => ({ ...d, entries: [...d.entries, entry] }));
-  const deleteEntry = (dayNum, id) => mutateDay(dayNum, (d) => ({ ...d, entries: d.entries.filter((e) => e.id !== id) }));
+  const addEntry = (dayNum, entry) => mutateDay(dayNum, (d) => ({ ...d, entries: [...(d.entries || []), entry] }));
+  const deleteEntry = (dayNum, id) => mutateDay(dayNum, (d) => ({ ...d, entries: (d.entries || []).filter((e) => e.id !== id) }));
   const updateDayMeta = (dayNum, meta) => mutateDay(dayNum, (d) => ({ ...d, ...meta }));
 
   const monthTotals = useMemo(() => {
     let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
     const workDaySet = new Set();
     const byCat = {};
-    Object.entries(curData.days).forEach(([dk, d]) => (d.entries || []).forEach((e) => {
-      if (e.type === "income") {
-        gross += e.amount;
-        if (e.shift && SHIFT_SLOTS[e.shift]) {
-          workDaySet.add(dk);
-          if (COMBO_SHIFTS.has(e.shift)) {
-            countFull++;
-          } else if (e.shift === "C") {
-            countC++;
-          } else {
-            countA++;
+    if (curData && curData.days) {
+      Object.entries(curData.days).forEach(([dk, d]) => (d.entries || []).forEach((e) => {
+        if (e.type === "income") {
+          gross += e.amount;
+          if (e.shift && SHIFT_SLOTS[e.shift]) {
+            workDaySet.add(dk);
+            if (COMBO_SHIFTS.has(e.shift)) {
+              countFull++;
+            } else if (e.shift === "C") {
+              countC++;
+            } else {
+              countA++;
+            }
           }
+        } else {
+          if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
+          byCat[e.category] = (byCat[e.category] || 0) + e.amount;
         }
-      } else {
-        if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
-        byCat[e.category] = (byCat[e.category] || 0) + e.amount;
-      }
-    }));
+      }));
+    }
     const totalGeun = countA + countC + countFull * 2;
     return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size, totalGeun } };
   }, [curData, taxRate]);
@@ -572,14 +569,16 @@ export default function App() {
     if (!isCurrentMonth) return 0;
     const todayD = realToday.getDate();
     let sum = 0;
-    Object.entries(curData.days).forEach(([dk, d]) => { if (parseInt(dk, 10) <= todayD) (d.entries || []).forEach((e) => { if (e.type === "expense" && e.category !== ASSET_CAT) sum += e.amount; }); });
+    if (curData && curData.days) {
+      Object.entries(curData.days).forEach(([dk, d]) => { if (parseInt(dk, 10) <= todayD) (d.entries || []).forEach((e) => { if (e.type === "expense" && e.category !== ASSET_CAT) sum += e.amount; }); });
+    }
     return sum;
   }, [curData, isCurrentMonth]);
   const todaySpent = useMemo(() => {
     if (!isCurrentMonth) return 0;
-    const d = curData.days[pad2(realToday.getDate())];
+    const d = curData.days ? curData.days[pad2(realToday.getDate())] : null;
     if (!d) return 0;
-    return d.entries.filter((e) => e.type === "expense" && e.category !== ASSET_CAT).reduce((a, e) => a + e.amount, 0);
+    return (d.entries || []).filter((e) => e.type === "expense" && e.category !== ASSET_CAT).reduce((a, e) => a + e.amount, 0);
   }, [curData, isCurrentMonth]);
 
   const goal = settings.goal || DEFAULT_GOAL;
@@ -632,7 +631,7 @@ export default function App() {
     const list = [];
     for (let d = 1; d <= dim; d++) {
       const dk = pad2(d);
-      const dayObj = curData.days[dk];
+      const dayObj = curData.days ? curData.days[dk] : null;
       const wdLabel = WEEK_LABELS[new Date(year, month, d).getDay()];
       if (dayObj && dayObj.label === "휴무") {
         list.push(`${month + 1}/${d}(${wdLabel}) 휴무`);
@@ -653,7 +652,7 @@ export default function App() {
   const handleBatchScheduleImport = async (parsedMap, storeName) => {
     const k = monthKey(year, month);
     const data = cache[k] || { days: {} };
-    const nextDays = { ...data.days };
+    const nextDays = { ...(data.days || {}) };
 
     Object.entries(parsedMap).forEach(([dayNumStr, shiftKey]) => {
       const dk = pad2(parseInt(dayNumStr, 10));
@@ -664,7 +663,7 @@ export default function App() {
       } else if (SHIFT_INFO[shiftKey]) {
         const amt = COMBO_SHIFTS.has(shiftKey) ? (settings.fixedRates?.two || TWO_SHIFT) : (settings.fixedRates?.one || ONE_SHIFT);
         const newEntry = { id: uid(), type: "income", category: storeName, shift: shiftKey, amount: amt, memo: "" };
-        const cleanEntries = existing.entries.filter((e) => !e.shift);
+        const cleanEntries = (existing.entries || []).filter((e) => !e.shift);
         nextDays[dk] = { ...existing, entries: [...cleanEntries, newEntry] };
       }
     });
@@ -714,12 +713,14 @@ export default function App() {
     const rows = [["날짜", "유형", "카테고리", "조", "금액", "메모"]];
     Object.entries(months).sort().forEach(([key, data]) => {
       const ym = key.replace("month:", "");
-      Object.entries(data.days || {}).forEach(([dk, dayObj]) => {
-        (dayObj.entries || []).forEach((e) => {
-          const memo = (e.memo || "").replace(/"/g, "'");
-          rows.push([`${ym}-${dk}`, e.type === "income" ? "수입" : "지출", e.category, e.shift ? SHIFT_INFO[e.shift]?.label || "" : "", e.amount, `"${memo}"`]);
+      if (data && data.days) {
+        Object.entries(data.days).forEach(([dk, dayObj]) => {
+          (dayObj.entries || []).forEach((e) => {
+            const memo = (e.memo || "").replace(/"/g, "'");
+            rows.push([`${ym}-${dk}`, e.type === "income" ? "수입" : "지출", e.category, e.shift ? SHIFT_INFO[e.shift]?.label || "" : "", e.amount, `"${memo}"`]);
+          });
         });
-      });
+      }
     });
     const csv = "\uFEFF" + rows.map((r) => r.join(",")).join("\n");
     downloadText(`모으다_${realToday.getFullYear()}_증빙.csv`, "text/csv;charset=utf-8", csv);
@@ -727,7 +728,7 @@ export default function App() {
   };
   const saveWallpaper = () => {
     try {
-      const dataUrl = generateCalendarPNG(year, month, curData.days);
+      const dataUrl = generateCalendarPNG(year, month, curData.days || {});
       downloadDataUrl(`모으다_${year}${pad2(month + 1)}_배경화면.png`, dataUrl);
       setToast("배경화면 이미지를 저장했어요");
     } catch (e) { console.error(e); setToast("이미지 생성에 실패했어요"); }
@@ -769,7 +770,7 @@ export default function App() {
           <>
             {tab === "calendar" && (
               <CalendarView
-                year={year} month={month} changeMonth={changeMonth} daysData={curData.days}
+                year={year} month={month} changeMonth={changeMonth} daysData={curData.days || {}}
                 onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopyOffDays={copyOffDaysText}
                 onOpenImportModal={() => setImportModalOpen(true)}
               />
@@ -813,7 +814,7 @@ export default function App() {
         {selectedDay && (
           <DayModal
             year={year} month={month} day={selectedDay}
-            dayObj={curData.days[pad2(selectedDay)] || emptyDay()}
+            dayObj={curData.days ? curData.days[pad2(selectedDay)] || emptyDay() : emptyDay()}
             settings={settings}
             onClose={() => setSelectedDay(null)}
             onAdd={(entry) => addEntry(selectedDay, entry)}
@@ -859,7 +860,7 @@ export default function App() {
   );
 }
 
-// ---------- DailyPlannerView (캘린더 스케줄 실시간 연동 및 순서 변경 구현) ----------
+// ---------- DailyPlannerView ----------
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo, onMoveTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
@@ -868,18 +869,15 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
   const selDateObj = new Date(selY, selM - 1, selD);
   const selWd = WEEK_LABELS[selDateObj.getDay()];
 
-  // 선택된 날짜의 연/월 데이터를 확실하게 로드
   useEffect(() => {
     ensureMonth(selY, selM - 1);
   }, [selY, selM, ensureMonth]);
 
-  // ✅ 캘린더 데이터와 정확히 매칭되는 키로 해당 일자 스케줄 조회
   const targetMonthKey = monthKey(selY, selM - 1);
   const targetMonthData = cache[targetMonthKey] || { days: {} };
-  const selDayData = targetMonthData.days[pad2(selD)] || emptyDay();
+  const selDayData = targetMonthData.days ? targetMonthData.days[pad2(selD)] || emptyDay() : emptyDay();
   const workEntries = (selDayData.entries || []).filter((e) => e.shift);
 
-  // 이번 주 7일 생성 (일요일 시작)
   const weekDates = useMemo(() => {
     const list = [];
     const curr = new Date(selY, selM - 1, selD);
@@ -914,7 +912,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         {selM}월 {selD}일 ({selWd})
       </div>
 
-      {/* 상단 주간 이동 버튼 및 달력 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: "10px 8px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, padding: "0 4px" }}>
           <button onClick={() => changeWeek(-7)} style={{ fontSize: 12, fontWeight: 700, color: INDIGO, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 2 }}>
@@ -950,7 +947,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         </div>
       </div>
 
-      {/* 캘린더 스케줄 실시간 연동 카드 */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 4 }}>등록된 근무/일정</div>
         {workEntries.length > 0 ? (
@@ -967,7 +963,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
         )}
       </div>
 
-      {/* 카테고리 태그 및 할 일 체크리스트 (순서 변경 버튼 포함) */}
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 16 }}>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>카테고리 선택</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -1017,8 +1012,6 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
                         {item.text}
                       </span>
                     </button>
-                    
-                    {/* 순서 변경 및 삭제 버튼 */}
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <button onClick={() => onMoveTodo(item.id, "up")} disabled={idx === 0} style={{ padding: 2, background: "transparent", border: "none", cursor: idx === 0 ? "not-allowed" : "pointer", opacity: idx === 0 ? 0.3 : 1 }}><ChevronUp size={15} color={INK} /></button>
                       <button onClick={() => onMoveTodo(item.id, "down")} disabled={idx === catTodos.length - 1} style={{ padding: 2, background: "transparent", border: "none", cursor: idx === catTodos.length - 1 ? "not-allowed" : "pointer", opacity: idx === catTodos.length - 1 ? 0.3 : 1 }}><ChevronDown size={15} color={INK} /></button>
@@ -1595,6 +1588,424 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- DailyBudgetCard ----------
+function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpent, realToday, year, month, savingGoal }) {
+  if (!isCurrentMonth) {
+    return (
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16, textAlign: "center", color: MUTED, fontSize: 12 }}>
+        하루 권장 지출액 카드는 이번 달({realToday.getFullYear()}.{pad2(realToday.getMonth() + 1)})에서만 표시돼요
+      </div>
+    );
+  }
+  const dim = daysInMonth(year, month);
+  const todayD = realToday.getDate();
+  const remainingDays = Math.max(1, dim - todayD + 1);
+  const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
+  
+  const budget = (monthTotals.net - fixedTotal - (savingGoal || 0) - expenseToDate) / remainingDays;
+  const over = budget < 0 || todaySpent > Math.max(budget, 0);
+
+  return (
+    <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 6 }}>오늘의 권장 지출액 · 남은 {remainingDays}일</div>
+      <div className="mono" style={{ fontSize: 24, fontWeight: 700, color: over ? EXPENSE : INCOME, marginBottom: 6 }}>{won(Math.max(budget, 0))}</div>
+      <div style={{ fontSize: 12, color: "#8A8272" }}>
+        {savingGoal > 0 && <span style={{ color: GOLD, fontWeight: 600 }}>[목표 저축액 {won(savingGoal)} 차감] </span>}
+        오늘 권장 지출액은 <span className="mono" style={{ fontWeight: 700, color: INK }}>{won(Math.max(budget, 0))}</span>입니다.
+        {" "}오늘 이미 <span className="mono" style={{ fontWeight: 700 }}>{won(todaySpent)}</span> 썼어요.{" "}
+        {budget < 0 ? "이번 달 예산을 초과했어요." : over ? "오늘 권장액을 넘었어요, 내일은 조금 아껴볼까요?" : "잘 지키고 있어요, 이대로 좋아요!"}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Report ----------
+function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday, prevNet }) {
+  const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
+  const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
+  const ws = monthTotals.workStats;
+
+  const prevMonthNum = month === 0 ? 12 : month;
+
+  const currentToday = new Date();
+  const targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
+  if (currentToday.getDate() > payday) {
+    targetPayday.setMonth(targetPayday.getMonth() + 1);
+  }
+  const diffDays = Math.ceil((targetPayday - currentToday) / (1000 * 60 * 60 * 24));
+
+  return (
+    <div style={{ padding: "16px 20px 100px" }}>
+      <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>💰</span> {prevMonthNum}월 근무 급여 입금일 (매달 {payday}일)
+          </div>
+          <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>
+            {diffDays === 0 ? "D-DAY 🎉" : `D-${diffDays}`}
+          </div>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#C9BFA8", marginTop: 2 }}>
+          입금 예정 실수령액: <span className="mono" style={{ color: "#fff", fontWeight: 700 }}>{won(prevNet)}</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>정산</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={() => setYear(year - 1)} style={{ padding: 4, background: "transparent", border: "none" }}><ChevronLeft size={16} /></button>
+          <span className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{year}년</span>
+          <button onClick={() => setYear(year + 1)} style={{ padding: 4, background: "transparent", border: "none" }}><ChevronRight size={16} /></button>
+        </div>
+      </div>
+
+      <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={year} month={month} savingGoal={savingGoal} />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}><Target size={12} /> 수입 목표</div>
+            {goalEdit ? (
+              <button onClick={commitGoal} style={{ fontSize: 11, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>저장</button>
+            ) : (
+              <button onClick={() => { setGoalEdit(true); setGoalInput(String(goal)); }} style={{ fontSize: 11, color: MUTED, background: "transparent", border: "none" }}>수정</button>
+            )}
+          </div>
+          {goalEdit ? (
+            <input autoFocus inputMode="numeric" defaultValue={goal} onChange={(e) => setGoalInput(e.target.value)} className="mono" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 6, padding: "2px 4px", fontSize: 12 }} />
+          ) : (
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: INDIGO }}>{won(goal)}</div>
+          )}
+          <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>달성률 <span className="mono" style={{ fontWeight: 700, color: INK }}>{achieveRate.toFixed(0)}%</span></div>
+        </div>
+
+        <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}><PiggyBank size={12} color={GOLD} /> 적금/저축 목표</div>
+            {savingGoalEdit ? (
+              <button onClick={commitSavingGoal} style={{ fontSize: 11, fontWeight: 700, color: INDIGO, background: "transparent", border: "none" }}>저장</button>
+            ) : (
+              <button onClick={() => { setSavingGoalEdit(true); setSavingGoalInput(String(savingGoal)); }} style={{ fontSize: 11, color: MUTED, background: "transparent", border: "none" }}>수정</button>
+            )}
+          </div>
+          {savingGoalEdit ? (
+            <input autoFocus inputMode="numeric" defaultValue={savingGoal} onChange={(e) => setSavingGoalInput(e.target.value)} className="mono" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 6, padding: "2px 4px", fontSize: 12 }} />
+          ) : (
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>{won(savingGoal)}</div>
+          )}
+          <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>권장 예산 자동 차감</div>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>이번 달 출근 현황</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A.color} />
+        <MiniStatCard label="C조" value={ws.countC} color={SHIFT_INFO.C.color} />
+        <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.AC.color} />
+      </div>
+      <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 출근 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.totalGeun}근</span> <span style={{ color: "#C9BFA8" }}>(A/C조는 2근으로 계산)</span></div>
+
+      <div className="display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{`<${month + 1}월 급여>`}</div>
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        <Row label="세전 총수당" value={monthTotals.gross} color={INCOME} />
+        <Row label={`${taxInfo.label} 공제`} value={-(monthTotals.gross * taxInfo.rate)} color={EXPENSE} />
+        <Row label="세후 실수령액" value={monthTotals.net} color={INK} bold big />
+        <div style={{ height: 1, background: PAPER_LINE, margin: "10px 0" }} />
+        <Row label="고정비" value={-fixedTotal} color={EXPENSE} />
+        <Row label="변동 지출" value={-(monthTotals.expense - fixedTotal)} color={EXPENSE} />
+        <Row label="적금/투자" value={monthTotals.asset} color={GOLD} />
+      </div>
+
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>
+          세금 모아보기
+          <InfoTip text="매 수당에서 자동 공제되는 세액을 모아 보여드려요. 5월 종합소득세 신고 시 환급 또는 추가납부를 참고하는 용도예요. 실제 세액은 소득공제 등에 따라 달라질 수 있어요." />
+        </div>
+        <Row label={`이번 달 ${taxInfo.label}`} value={monthTotals.gross * taxInfo.rate} color={EXPENSE} bold />
+        <Row label={`${year}년 누적 ${taxInfo.label}`} value={yearTotals.tax} color={INK} bold big />
+      </div>
+
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>{year}년 연간 누적 (종합소득세 신고용)</div>
+        <Row label="연간 세전 총수당" value={yearTotals.gross} color={INCOME} />
+        <Row label="연간 실수령 추정" value={yearTotals.net} color={INK} bold big />
+      </div>
+    </div>
+  );
+}
+function MiniStatCard({ label, value, color }) {
+  return (
+    <div style={{ flex: 1, background: CARD, textAlign: "center", border: `1.3px solid ${color}`, borderRadius: 14, padding: "12px 4px" }}>
+      <div style={{ fontSize: 11.5, color: MUTED, fontWeight: 700, marginBottom: 4 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 20, fontWeight: 700, color }}>{value}<span style={{ fontSize: 12, fontWeight: 600 }}>회</span></div>
+    </div>
+  );
+}
+
+// ---------- Analysis ----------
+function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearScanLoaded }) {
+  const data = EXPENSE_CATS.filter((c) => c.key !== ASSET_CAT && monthTotals.byCat[c.key] > 0).map((c) => ({ name: c.key, value: monthTotals.byCat[c.key] || 0, color: c.color }));
+  const hasData = data.length > 0;
+  const netOut = monthTotals.expense, saved = monthTotals.asset, total = netOut + saved || 1;
+  const monthsWithPay = monthlySeries.filter((m) => m.gross > 0).length;
+  const avgMonthly = monthsWithPay ? yearTotals.gross / monthsWithPay : 0;
+  const hasYearData = monthsWithPay > 0;
+  return (
+    <div style={{ padding: "16px 20px 100px" }}>
+      <div className="display" style={{ fontSize: 19, fontWeight: 700, marginBottom: 16 }}>소비 패턴 분석</div>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>{year}년 월별 급여 추이</div>
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        {hasYearData ? (
+          <div style={{ width: "100%", height: 180 }}>
+            <ResponsiveContainer>
+              <BarChart data={monthlySeries} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke={PAPER_LINE} />
+                <XAxis dataKey="month" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: PAPER_LINE }} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: MUTED }} axisLine={false} tickLine={false} tickFormatter={(v) => `${Math.round(v / 10000)}만`} />
+                <Tooltip formatter={(v) => won(v)} labelStyle={{ color: INK }} />
+                <Bar dataKey="gross" fill={GOLD} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (<div style={{ textAlign: "center", color: MUTED, fontSize: 13, padding: "30px 0" }}>{yearScanLoaded ? `${year}년 수입 기록이 아직 없어요` : "불러오는 중…"}</div>)}
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <div style={{ flex: 1, textAlign: "center", border: `1.3px solid ${GOLD}`, borderRadius: 12, padding: "10px 4px" }}>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, marginBottom: 4 }}>연평균 월급여(세전)</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: GOLD }}>{won(avgMonthly)}</div>
+          </div>
+          <div style={{ flex: 1, textAlign: "center", border: `1.3px solid ${INCOME}`, borderRadius: 12, padding: "10px 4px" }}>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, marginBottom: 4 }}>올해 총 수령액(세후)</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: INCOME }}>{won(yearTotals.net)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>카테고리별 지출 비중</div>
+        {hasData ? (
+          <div style={{ width: "100%", height: 220 }}>
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie data={data} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
+                  {data.map((d, i) => <Cell key={i} fill={d.color} stroke={CARD} strokeWidth={2} />)}
+                </Pie>
+                <Tooltip formatter={(v) => won(v)} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (<div style={{ textAlign: "center", color: MUTED, fontSize: 13, padding: "30px 0" }}>이번 달 지출 기록이 없어요</div>)}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 8, justifyContent: "center" }}>
+          {data.map((d) => (<div key={d.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}><span style={{ width: 8, height: 8, borderRadius: 8, background: d.color, display: "inline-block" }} />{d.name} <span className="mono">{won(d.value)}</span></div>))}
+        </div>
+      </div>
+      <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>사라지는 돈 vs 모이는 돈</div>
+        <div style={{ display: "flex", height: 14, borderRadius: 7, overflow: "hidden", marginBottom: 10 }}>
+          <div style={{ width: `${(netOut / total) * 100}%`, background: EXPENSE }} />
+          <div style={{ width: `${(saved / total) * 100}%`, background: INCOME }} />
+        </div>
+        <Row label="순지출 (사라지는 돈)" value={-netOut} color={EXPENSE} />
+        <Row label="적금/투자 (모이는 돈)" value={saved} color={INCOME} />
+      </div>
+    </div>
+  );
+}
+
+// ---------- Settings modal ----------
+function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
+  const fileRef = useRef(null);
+  const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
+  const [rTwo, setRTwo] = useState(settings.fixedRates?.two || TWO_SHIFT);
+  const [rHourly, setRHourly] = useState(settings.hourlyRate || DEFAULT_HOURLY);
+  const [rDaily, setRDaily] = useState(settings.dailyRate || DEFAULT_DAILY);
+  const [paydayInput, setPaydayInput] = useState(settings.payday || DEFAULT_PAYDAY);
+
+  const [type, setType] = useState("expense");
+  const [category, setCategory] = useState(FIXED_CAT);
+  const [amount, setAmount] = useState("");
+  const [day, setDay] = useState("25");
+  const [memo, setMemo] = useState("");
+
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatColor, setNewCatColor] = useState("#3B5BA5");
+
+  const hiddenStores = settings.hiddenStores || [];
+  const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
+  const activeCustoms = (settings.customStores || []).filter((s) => !hiddenStores.includes(s.name));
+  const allActiveStores = [...activeDefaults, ...activeCustoms];
+
+  const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
+
+  const handleAddTodoCat = () => {
+    if (!newCatName.trim()) return;
+    const newCat = { id: uid(), name: newCatName.trim(), color: newCatColor };
+    onPatch({ todoCats: [...todoCats, newCat] });
+    setNewCatName("");
+  };
+
+  const handleDeleteTodoCat = (id) => {
+    const filtered = todoCats.filter((c) => c.id !== id);
+    onPatch({ todoCats: filtered });
+  };
+
+  const submitRecurring = () => {
+    const amt = parseInt(amount.replace(/[^0-9]/g, ""), 10);
+    const d = Math.min(31, Math.max(1, parseInt(day, 10) || 1));
+    if (!amt) return;
+    onAddRecurring({ type, category: type === "income" ? (category || "고정수입") : category, amount: amt, day: d, memo });
+    setAmount(""); setMemo("");
+  };
+
+  const commitPayday = () => {
+    const d = Math.min(31, Math.max(1, parseInt(paydayInput, 10) || DEFAULT_PAYDAY));
+    onPatch({ payday: d });
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 60 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out" }}>
+        <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>설정</div>
+          <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none" }}><X size={20} color={MUTED} /></button>
+        </div>
+        <TornEdge color={CARD} />
+
+        <div style={{ padding: "8px 20px 30px" }}>
+          <SectionTitle>플래너 카테고리 관리 (투두메이트 방식)</SectionTitle>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {todoCats.map((cat) => (
+              <span key={cat.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${cat.color}`, color: cat.color }}>
+                {cat.name}
+                <button onClick={() => handleDeleteTodoCat(cat.id)} style={{ padding: 0, background: "transparent", border: "none", cursor: "pointer", display: "flex" }}><X size={12} color={cat.color} /></button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+            <input placeholder="새 카테고리 (예: 운동)" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 12.5 }} />
+            <input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)} style={{ width: 36, height: 36, border: "none", background: "transparent", cursor: "pointer" }} />
+            <button onClick={handleAddTodoCat} style={{ background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "0 12px", fontWeight: 700, fontSize: 12 }}>추가</button>
+          </div>
+
+          <SectionTitle>급여일 설정 (D-Day 카운트다운)</SectionTitle>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+            <span style={{ fontSize: 13, color: "#6B6455" }}>매달</span>
+            <input inputMode="numeric" value={paydayInput} onChange={(e) => setPaydayInput(e.target.value.replace(/[^0-9]/g, ""))} onBlur={commitPayday} className="mono" style={{ width: 60, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 14, textAlign: "center" }} />
+            <span style={{ fontSize: 13, color: "#6B6455" }}>일이 급여 입금일이에요</span>
+          </div>
+
+          <SectionTitle>근무 유형</SectionTitle>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <SegButton active={settings.workType === "fixed"} onClick={() => onPatch({ workType: "fixed" })}>매장/조 고정수당형</SegButton>
+            <SegButton active={settings.workType === "hourly"} onClick={() => onPatch({ workType: "hourly" })}>시급제</SegButton>
+            <SegButton active={settings.workType === "daily"} onClick={() => onPatch({ workType: "daily" })}>일급/공수제</SegButton>
+          </div>
+
+          {settings.workType === "fixed" && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              <RateField label="단일조 A/A1/A2/C (1근)" value={rOne} setValue={setROne} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, one: parseInt(rOne, 10) || ONE_SHIFT } })} />
+              <RateField label="조합조 A/C·A1/C (2근)" value={rTwo} setValue={setRTwo} onCommit={() => onPatch({ fixedRates: { ...settings.fixedRates, two: parseInt(rTwo, 10) || TWO_SHIFT } })} />
+            </div>
+          )}
+          {settings.workType === "hourly" && (
+            <div style={{ marginBottom: 20 }}><RateField label="시급" value={rHourly} setValue={setRHourly} onCommit={() => onPatch({ hourlyRate: parseInt(rHourly, 10) || DEFAULT_HOURLY })} /></div>
+          )}
+          {settings.workType === "daily" && (
+            <div style={{ marginBottom: 20 }}><RateField label="1공수 단가" value={rDaily} setValue={setRDaily} onCommit={() => onPatch({ dailyRate: parseInt(rDaily, 10) || DEFAULT_DAILY })} /></div>
+          )}
+
+          <SectionTitle>세금 공제율</SectionTitle>
+          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+            <SegButton active={settings.taxMode === "3.3"} onClick={() => onPatch({ taxMode: "3.3" })}>3.3% 원천징수</SegButton>
+            <SegButton active={settings.taxMode === "4dae"} onClick={() => onPatch({ taxMode: "4dae" })}>4대보험 9.4%</SegButton>
+            <SegButton active={settings.taxMode === "none"} onClick={() => onPatch({ taxMode: "none" })}>비과세/미공제</SegButton>
+          </div>
+
+          <SectionTitle>매장 프리셋 관리</SectionTitle>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
+            등록된 매장 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요. 9월 등 매장이 완전히 바뀔 때 편하게 정리해 보세요.
+          </div>
+          {allActiveStores.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {allActiveStores.map((s) => (
+                <span key={s.name} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px 6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${s.color}`, color: s.color }}>
+                  {s.name}
+                  <button onClick={() => onDeleteStorePreset(s.name)} style={{ display: "flex", padding: 2, background: "transparent", border: "none", cursor: "pointer" }}><X size={12} color={s.color} /></button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>등록된 매장이 없어요. 수입 입력에서 새 매장을 추가해 보세요.</div>
+          )}
+          {(hiddenStores.length > 0 || (settings.customStores || []).length > 0) && (
+            <button onClick={onResetStorePresets} style={{ fontSize: 11.5, color: INDIGO, fontWeight: 700, background: "transparent", border: "none", padding: 0, marginBottom: 20, cursor: "pointer" }}>
+              ↺ 기본 매장 목록으로 전체 복원하기
+            </button>
+          )}
+
+          <SectionTitle>고정 항목 (매달 자동 등록)</SectionTitle>
+          {(settings.recurring || []).length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              {settings.recurring.map((r) => (
+                <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px dashed ${PAPER_LINE}`, opacity: r.active ? 1 : 0.45 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>{r.category} <span style={{ fontSize: 11, fontWeight: 500, color: MUTED }}>· 매달 {r.day}일</span></div>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: r.type === "income" ? INCOME : EXPENSE }}>{r.type === "income" ? "+" : "-"}{won(r.amount)}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button onClick={() => onToggleRecurring(r.id)} style={{ fontSize: 11, fontWeight: 700, color: r.active ? INDIGO : MUTED, border: `1px solid ${r.active ? INDIGO : PAPER_LINE}`, borderRadius: 20, padding: "4px 10px", background: "transparent" }}>{r.active ? "사용 중" : "꺼짐"}</button>
+                    <button onClick={() => onDeleteRecurring(r.id)} style={{ padding: 4, background: "transparent", border: "none" }}><Trash2 size={16} color="#C9BFA8" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <SegButton active={type === "expense"} onClick={() => { setType("expense"); setCategory(FIXED_CAT); }}>고정 지출</SegButton>
+            <SegButton active={type === "income"} onClick={() => { setType("income"); setCategory("고정수입"); }}>고정 수입</SegButton>
+          </div>
+          {type === "expense" ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {EXPENSE_CATS.filter((c) => c.key !== ASSET_CAT).map((c) => (
+                <button key={c.key} onClick={() => setCategory(c.key)} style={{ padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${category === c.key ? c.color : PAPER_LINE}`, background: category === c.key ? c.color : "transparent", color: category === c.key ? "#fff" : INK }}>{c.key}</button>
+              ))}
+            </div>
+          ) : (
+            <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="수입 이름 (예: 고정 출연료)" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 10 }} />
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <input inputMode="numeric" placeholder="금액" value={amount} onChange={(e) => setAmount(e.target.value)} className="mono" style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "10px 12px", fontSize: 14 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "0 10px" }}>
+              <input inputMode="numeric" value={day} onChange={(e) => setDay(e.target.value.replace(/[^0-9]/g, ""))} className="mono" style={{ width: 30, border: "none", fontSize: 14, textAlign: "center" }} />
+              <span style={{ fontSize: 13, color: MUTED }}>일</span>
+            </div>
+          </div>
+          <input placeholder="메모 (예: 월세, 통신비)" value={memo} onChange={(e) => setMemo(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 12 }} />
+          <button onClick={submitRecurring} style={{ width: "100%", background: INK, color: "#fff", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 24 }}>
+            <RefreshCw size={14} /> 고정 항목 추가
+          </button>
+
+          <SectionTitle>데이터 관리</SectionTitle>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 12, lineHeight: 1.5 }}>평소 기록은 자동으로 저장돼요. 아래 버튼은 비상용 백업이나 세금 신고용 자료가 필요할 때만 눌러주세요.</div>
+          <button onClick={onExportBackup} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${INDIGO}`, color: INDIGO, background: "transparent", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13, marginBottom: 8 }}><Download size={15} /> JSON 백업 다운로드</button>
+          <button onClick={() => fileRef.current?.click()} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: `1.3px solid ${MUTED}`, color: INK, background: "transparent", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13, marginBottom: 8 }}><Upload size={15} /> JSON 백업 복원</button>
+          <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { if (e.target.files?.[0]) onImportBackup(e.target.files[0]); e.target.value = ""; }} />
+          <button onClick={onExportCSV} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: GOLD, color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontWeight: 700, fontSize: 13 }}><FileSpreadsheet size={15} /> 종소세 증빙용 CSV 내보내기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function SectionTitle({ children }) { return <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>{children}</div>; }
+function RateField({ label, value, setValue, onCommit }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <div style={{ fontSize: 11, color: MUTED, marginBottom: 4 }}>{label}</div>
+      <input inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ""))} onBlur={onCommit} className="mono" style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 10px", fontSize: 14 }} />
     </div>
   );
 }
