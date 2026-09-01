@@ -300,9 +300,10 @@ function generateCalendarPNG(year, month, daysData, customShifts = {}) {
       ctx.fillStyle = storeColor(first.category);
       ctx.font = "600 18px sans-serif";
       ctx.fillText(first.category, x + 16, y + 68);
-      ctx.fillStyle = shiftMap[first.shift]?.color || INK;
+      const sInfo = shiftMap[first.shift] || DEFAULT_SHIFT_INFO[first.shift] || { label: first.shift, color: INK };
+      ctx.fillStyle = sInfo.color || INK;
       ctx.font = "700 20px sans-serif";
-      const shiftText = (shiftMap[first.shift]?.label || first.shift) + (work.length > 1 ? ` 외${work.length - 1}` : "");
+      const shiftText = (sInfo.label || first.shift) + (work.length > 1 ? ` 외${work.length - 1}` : "");
       ctx.fillText(shiftText, x + 16, y + 96);
     } else if (dayObj && dayObj.label) {
       ctx.fillStyle = labelColorOf(dayObj.label);
@@ -515,7 +516,12 @@ export default function App() {
 
   const curData = cache[monthKey(year, month)] || { days: {} };
   const reportCurData = cache[monthKey(reportYear, reportMonth)] || { days: {} };
-  const combinedShiftInfo = { ...DEFAULT_SHIFT_INFO, ...(settings.customShifts || {}) };
+  const hiddenShifts = settings.hiddenShifts || [];
+  const activeDefaultShifts = Object.entries(DEFAULT_SHIFT_INFO).filter(([k]) => !hiddenShifts.includes(k));
+  const combinedShiftInfo = {
+    ...Object.fromEntries(activeDefaultShifts),
+    ...(settings.customShifts || {})
+  };
 
   const changeMonth = (delta) => {
     let m = month + delta, y = year;
@@ -827,7 +833,7 @@ export default function App() {
                 onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopyOffDays={copyOffDaysText}
                 onOpenImportModal={() => setImportModalOpen(true)}
                 customLabels={settings.customLabels || []}
-                customShifts={settings.customShifts || {}}
+                customShifts={combinedShiftInfo}
               />
             )}
             {tab === "daily" && (
@@ -922,7 +928,12 @@ export default function App() {
 function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureMonth, cache, settings, onAddTodo, onToggleTodo, onDeleteTodo, onMoveTodo }) {
   const [activeCatId, setActiveCatId] = useState(settings.todoCats?.[0]?.id || "c1");
   const [inputText, setInputText] = useState("");
-  const combinedShiftInfo = { ...DEFAULT_SHIFT_INFO, ...(settings.customShifts || {}) };
+  const hiddenShifts = settings.hiddenShifts || [];
+  const activeDefaultShifts = Object.entries(DEFAULT_SHIFT_INFO).filter(([k]) => !hiddenShifts.includes(k));
+  const combinedShiftInfo = {
+    ...Object.fromEntries(activeDefaultShifts),
+    ...(settings.customShifts || {})
+  };
 
   const [selY, selM, selD] = selectedDateStr.split("-").map((x) => parseInt(x, 10));
   const selDateObj = new Date(selY, selM - 1, selD);
@@ -1152,7 +1163,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
   const isToday = (d) => { const t = new Date(); return d === t.getDate() && month === t.getMonth() && year === t.getFullYear(); };
 
   const allLabels = [...DEFAULT_LABELS, ...customLabels];
-  const combinedShiftInfo = { ...DEFAULT_SHIFT_INFO, ...customShifts };
+  const combinedShiftInfo = customShifts;
 
   return (
     <div style={{ padding: "14px 14px 100px" }}>
@@ -1208,7 +1219,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 ) : work.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     {work.map((wItem, wIdx) => {
-                      const sInfo = combinedShiftInfo[wItem.shift];
+                      const sInfo = combinedShiftInfo[wItem.shift] || { label: wItem.shift, color: INK };
                       return (
                         <div key={wItem.id || wIdx} style={{ fontSize: 8.5, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 1.5, width: "100%" }}>
                           <div style={{ fontWeight: 600, color: storeColor(wItem.category), fontSize: 8.5, wordBreak: "break-all", lineHeight: 1.1 }}>
@@ -1249,7 +1260,12 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   const [parsedPreview, setParsedPreview] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const fileRef = useRef(null);
-  const combinedShiftInfo = { ...DEFAULT_SHIFT_INFO, ...(settings.customShifts || {}) };
+  const hiddenShifts = settings.hiddenShifts || [];
+  const activeDefaultShifts = Object.entries(DEFAULT_SHIFT_INFO).filter(([k]) => !hiddenShifts.includes(k));
+  const combinedShiftInfo = {
+    ...Object.fromEntries(activeDefaultShifts),
+    ...(settings.customShifts || {})
+  };
 
   const normalizeShift = (val) => {
     if (!val) return null;
@@ -1433,7 +1449,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   );
 }
 
-// ---------- DayModal (커스텀 조 만들기 폼 찌그러짐 방지 레이아웃 교체 완료) ----------
+// ---------- DayModal ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo, onPatchSettings }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -1460,7 +1476,12 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
   const customLabels = settings.customLabels || [];
   const allLabels = [...DEFAULT_LABELS, ...customLabels];
-  const combinedShiftInfo = { ...DEFAULT_SHIFT_INFO, ...(settings.customShifts || {}) };
+  const hiddenShifts = settings.hiddenShifts || [];
+  const activeDefaultShifts = Object.entries(DEFAULT_SHIFT_INFO).filter(([k]) => !hiddenShifts.includes(k));
+  const combinedShiftInfo = {
+    ...Object.fromEntries(activeDefaultShifts),
+    ...(settings.customShifts || {})
+  };
 
   const hiddenStores = settings.hiddenStores || [];
   const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
@@ -1471,7 +1492,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [customStore, setCustomStore] = useState("");
   const [useCustomStore, setUseCustomStore] = useState(false);
   const [saveAsPreset, setSaveAsPreset] = useState(true);
-  const [shift, setShift] = useState("A");
+  const [shift, setShift] = useState(Object.keys(combinedShiftInfo)[0] || "A");
   const entries = dayObj.entries || [];
   const conflict = computeConflict(entries, combinedShiftInfo);
 
@@ -1537,7 +1558,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
       storeName = customStore.trim() || "직접입력 매장";
       if (saveAsPreset && onAddStorePreset) onAddStorePreset(storeName);
     }
-    const sInfo = combinedShiftInfo[shift];
+    const sInfo = combinedShiftInfo[shift] || { time: "" };
     const isCombo = COMBO_SHIFTS.has(shift) || shift.includes("/") || (sInfo?.time && sInfo.time.includes("\n"));
     const amt = isCombo ? (settings.fixedRates?.two || TWO_SHIFT) : (settings.fixedRates?.one || ONE_SHIFT);
     onAdd({ id: uid(), type: "income", category: storeName, shift, amount: amt, memo: "" });
@@ -1600,7 +1621,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
           <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>수입 입력</div>
 
           {workType === "fixed" && (
-            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 12, padding: 14, marginBottom: 10, width: "100%", boxSizing: "border-box" }}>
               <div style={{ fontSize: 11, color: MUTED, marginBottom: 6 }}>매장</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                 {allStores.map((s) => (
@@ -1610,7 +1631,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
               </div>
               {useCustomStore && (
                 <div style={{ marginBottom: 10 }}>
-                  <input placeholder="매장명 직접 입력" value={customStore} onChange={(e) => setCustomStore(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, marginBottom: 6 }} />
+                  <input placeholder="매장명 직접 입력" value={customStore} onChange={(e) => setCustomStore(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, marginBottom: 6, boxSizing: "border-box" }} />
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: MUTED }}>
                     <input type="checkbox" checked={saveAsPreset} onChange={(e) => setSaveAsPreset(e.target.checked)} />
                     이 매장 프리셋에 저장해두기 (다음에 바로 선택 가능)
@@ -1625,17 +1646,17 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 </button>
               </div>
 
-              {/* ✅ [버그 수정] 모바일 화면(폭 480px 이하)에서 삐져나가지 않도록 flex-col 및 boxSizing 철저히 적용 */}
+              {/* ✅ [완벽한 박스 크기 및 줄바꿈 교정] 모바일 화면(폭 480px)에서 가로로 절대 삐져나가지 않도록 수직 적층형 flex-col과 box-sizing 적용 */}
               {customShiftOpen && (
-                <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8, width: "100%", boxSizing: "border-box" }}>
+                <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
-                  <div style={{ display: "flex", gap: 6, width: "100%" }}>
-                    <input placeholder="코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 12, minWidth: 0 }} />
-                    <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1.2, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 12, minWidth: 0 }} />
-                    <input type="color" value={newShiftColor} onChange={(e) => setNewShiftColor(e.target.value)} style={{ width: 34, height: 34, border: "none", background: "transparent", cursor: "pointer", flexShrink: 0 }} />
+                  <div style={{ display: "flex", gap: 6, width: "100%", boxSizing: "border-box" }}>
+                    <input placeholder="코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, minWidth: 0, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11, boxSizing: "border-box" }} />
+                    <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1.2, minWidth: 0, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11, boxSizing: "border-box" }} />
+                    <input type="color" value={newShiftColor} onChange={(e) => setNewShiftColor(e.target.value)} style={{ width: 32, height: 32, border: "none", background: "transparent", cursor: "pointer", flexShrink: 0 }} />
                   </div>
-                  <input placeholder="세부 시간 (예: 6:30-13:30 / 14:00-19:00)" value={newShiftTime} onChange={(e) => setNewShiftTime(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 12, boxSizing: "border-box" }} />
-                  <button onClick={handleRegisterCustomShift} style={{ width: "100%", background: INDIGO, color: "#fff", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>이 조 등록하고 선택하기</button>
+                  <input placeholder="세부 시간 (예: 6:30-13:30 / 14:00-19:00)" value={newShiftTime} onChange={(e) => setNewShiftTime(e.target.value)} style={{ width: "100%", maxWidth: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11, boxSizing: "border-box" }} />
+                  <button onClick={handleRegisterCustomShift} style={{ width: "100%", background: INDIGO, color: "#fff", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", boxSizing: "border-box" }}>이 조 등록하고 선택하기</button>
                 </div>
               )}
 
@@ -1706,7 +1727,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>오늘 기록</div>
               {entries.map((e) => {
-                const sInfo = combinedShiftInfo[e.shift];
+                const sInfo = combinedShiftInfo[e.shift] || { label: e.shift, color: INK };
                 return (
                   <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px dashed ${PAPER_LINE}` }}>
                     <div>
@@ -1958,7 +1979,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (설정 창 내 커스텀 조 ✕ 버튼 삭제 관리 섹션 탑재) ----------
+// ---------- Settings modal (기본 조 및 커스텀 조 통합 삭제 관리 기능 추가) ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
@@ -1984,6 +2005,8 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
   const customLabels = settings.customLabels || [];
   const customShifts = settings.customShifts || {};
+  const hiddenShifts = settings.hiddenShifts || [];
+  const activeDefaultShifts = Object.entries(DEFAULT_SHIFT_INFO).filter(([k]) => !hiddenShifts.includes(k));
 
   const handleAddTodoCat = () => {
     if (!newCatName.trim()) return;
@@ -2002,11 +2025,19 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
     onPatch({ customLabels: next });
   };
 
-  // ✅ [신규 구현] 설정 창 내 커스텀 조 삭제 함수
-  const handleDeleteCustomShift = (key) => {
-    const next = { ...customShifts };
-    delete next[key];
-    onPatch({ customShifts: next });
+  const handleDeleteShift = (key, isCustom) => {
+    if (isCustom) {
+      const next = { ...customShifts };
+      delete next[key];
+      onPatch({ customShifts: next });
+    } else {
+      const next = [...new Set([...hiddenShifts, key])];
+      onPatch({ hiddenShifts: next });
+    }
+  };
+
+  const resetShiftPresets = () => {
+    onPatch({ hiddenShifts: [], customShifts: {} });
   };
 
   const submitRecurring = () => {
@@ -2032,22 +2063,29 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
-          {/* ✅ [신규] 설정 창 내 커스텀 조(Shift) 프리셋 관리 섹션 (✕ 버튼으로 삭제 가능) */}
-          <SectionTitle>커스텀 조(Shift) 프리셋 관리</SectionTitle>
+          {/* ✅ [근무 조 관리 및 삭제 섹션] 기본 조와 커스텀 조 모두 ✕ 버튼으로 삭제 가능 */}
+          <SectionTitle>근무 조(Shift) 프리셋 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
-            등록된 커스텀 조 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요.
+            등록된 조 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요.
           </div>
-          {Object.keys(customShifts).length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
-              {Object.entries(customShifts).map(([key, info]) => (
-                <span key={key} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px 6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${info.color || GOLD}`, color: info.color || GOLD }}>
-                  {info.label || key} {info.time ? `(${info.time})` : ""}
-                  <button onClick={() => handleDeleteCustomShift(key)} style={{ display: "flex", padding: 2, background: "transparent", border: "none", cursor: "pointer" }}><X size={12} color={info.color || GOLD} /></button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, color: MUTED, marginBottom: 20 }}>등록된 커스텀 조가 없어요. 수입 입력에서 새 조를 만들어보세요.</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {activeDefaultShifts.map(([key, info]) => (
+              <span key={key} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px 6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${info.color || GOLD}`, color: info.color || GOLD }}>
+                {info.label}
+                <button onClick={() => handleDeleteShift(key, false)} style={{ display: "flex", padding: 2, background: "transparent", border: "none", cursor: "pointer" }}><X size={12} color={info.color || GOLD} /></button>
+              </span>
+            ))}
+            {Object.entries(customShifts).map(([key, info]) => (
+              <span key={key} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px 6px 12px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, border: `1.3px solid ${info.color || INDIGO}`, color: info.color || INDIGO }}>
+                {info.label || key}
+                <button onClick={() => handleDeleteShift(key, true)} style={{ display: "flex", padding: 2, background: "transparent", border: "none", cursor: "pointer" }}><X size={12} color={info.color || INDIGO} /></button>
+              </span>
+            ))}
+          </div>
+          {(hiddenShifts.length > 0 || Object.keys(customShifts).length > 0) && (
+            <button onClick={resetShiftPresets} style={{ fontSize: 11.5, color: INDIGO, fontWeight: 700, background: "transparent", border: "none", padding: 0, marginBottom: 20, cursor: "pointer" }}>
+              ↺ 기본 조 목록으로 전체 복원하기
+            </button>
           )}
 
           {customLabels.length > 0 && (
