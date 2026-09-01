@@ -1142,7 +1142,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (모바일 세로 비율 및 시간 표시 최적화) ----------
+// ---------- CalendarView (모바일 화면 레이아웃 최적화) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1202,7 +1202,6 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 5, height: 5, borderRadius: 5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              {/* ✅ [모바일 화면 맞춤형 최적화] 칸이 너무 길어져 화면을 넘지 않도록 간격과 폰트 크기 조정 */}
               <div style={{ marginTop: 2, width: "100%", lineHeight: 1.15, wordBreak: "break-all" }}>
                 {conflict ? (
                   <div style={{ fontSize: 9.5, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
@@ -1893,7 +1892,7 @@ function MiniStatCard({ label, value, color }) {
   );
 }
 
-// ---------- Analysis (모바일 브라우저 렌더링 오류 방지 고정 높이 래퍼 적용) ----------
+// ---------- Analysis ----------
 function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearScanLoaded }) {
   const data = EXPENSE_CATS.filter((c) => c.key !== ASSET_CAT && monthTotals.byCat[c.key] > 0).map((c) => ({ name: c.key, value: monthTotals.byCat[c.key] || 0, color: c.color }));
   const hasData = data.length > 0;
