@@ -1142,7 +1142,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (고정 크기 칸 유지 + 매장명 말줄임 없이 원본 그대로 유지, 캘린더 표에는 시간 미출력) ----------
+// ---------- CalendarView ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1202,7 +1202,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 4.5, height: 4.5, borderRadius: 4.5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              {/* ✅ [가독성 최종 개선] 월 달력에서는 매장명과 조 이름만 표시하고 시간은 숨김. 폰트 크기 및 행간 조절로 글자 잘림 방지 */}
+              {/* ✅ [완벽 개선] 매장명 길어도 안 잘리도록 줄바꿈(wordBreak) 허용 및 캘린더 표에는 시간 숨김 처리 */}
               <div style={{ marginTop: 1, width: "100%", lineHeight: 1.15, overflow: "hidden" }}>
                 {conflict ? (
                   <div style={{ fontSize: 9, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
