@@ -1142,7 +1142,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (완벽한 고정 칸 크기 및 말줄임 없이 쏙 들어가는 가독성 최적화) ----------
+// ---------- CalendarView (고정 크기 칸 유지 + 매장명 말줄임 없이 원본 그대로 유지, 캘린더 표에는 시간 미출력) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1202,35 +1202,30 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 4.5, height: 4.5, borderRadius: 4.5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              {/* ✅ [가독성 최종 개선] 길어지는 매장명은 한 줄로 자동 축소(word-break 및 글자 간격 압축) 적용하여 잘리지 않음 */}
-              <div style={{ marginTop: 1, width: "100%", lineHeight: 1.1, overflow: "hidden" }}>
+              {/* ✅ [가독성 최종 개선] 월 달력에서는 매장명과 조 이름만 표시하고 시간은 숨김. 폰트 크기 및 행간 조절로 글자 잘림 방지 */}
+              <div style={{ marginTop: 1, width: "100%", lineHeight: 1.15, overflow: "hidden" }}>
                 {conflict ? (
                   <div style={{ fontSize: 9, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
                 ) : work.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     {work.map((wItem, wIdx) => {
                       const sInfo = combinedShiftInfo[wItem.shift];
                       return (
-                        <div key={wItem.id || wIdx} style={{ fontSize: 8, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 1.5, width: "100%" }}>
-                          <div style={{ fontWeight: 600, color: storeColor(wItem.category), fontSize: 8, letterSpacing: -0.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div key={wItem.id || wIdx} style={{ fontSize: 8.5, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 1.5, width: "100%" }}>
+                          <div style={{ fontWeight: 600, color: storeColor(wItem.category), fontSize: 8.5, wordBreak: "break-all", lineHeight: 1.1 }}>
                             {wItem.category}
                           </div>
-                          <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 8.5 }}>
+                          <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 9, marginTop: 0.5 }}>
                             {sInfo?.label || wItem.shift}
                           </div>
-                          {sInfo?.time && (
-                            <div className="mono" style={{ fontSize: 7, color: MUTED, lineHeight: 1.0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {sInfo.time}
-                            </div>
-                          )}
                         </div>
                       );
                     })}
                   </div>
                 ) : dayObj?.label ? (
                   <>
-                    <div style={{ fontSize: 9, fontWeight: 600, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
-                    {dayObj.memo && <div style={{ fontSize: 8, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
+                    <div style={{ fontSize: 9.5, fontWeight: 600, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 8.5, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
                   </>
                 ) : null}
               </div>
