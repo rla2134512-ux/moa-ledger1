@@ -1433,7 +1433,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   );
 }
 
-// ---------- DayModal ----------
+// ---------- DayModal (커스텀 조 만들기 폼 찌그러짐 방지 레이아웃 교체 완료) ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo, onPatchSettings }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -1625,16 +1625,17 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 </button>
               </div>
 
+              {/* ✅ [버그 수정] 모바일 화면(폭 480px 이하)에서 삐져나가지 않도록 flex-col 및 boxSizing 철저히 적용 */}
               {customShiftOpen && (
-                <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 10, marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO, marginBottom: 6 }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input placeholder="조 코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 12 }} />
-                    <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 12 }} />
-                    <input type="color" value={newShiftColor} onChange={(e) => setNewShiftColor(e.target.value)} style={{ width: 32, height: 32, border: "none", background: "transparent", cursor: "pointer" }} />
+                <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8, width: "100%", boxSizing: "border-box" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
+                  <div style={{ display: "flex", gap: 6, width: "100%" }}>
+                    <input placeholder="코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 12, minWidth: 0 }} />
+                    <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1.2, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 12, minWidth: 0 }} />
+                    <input type="color" value={newShiftColor} onChange={(e) => setNewShiftColor(e.target.value)} style={{ width: 34, height: 34, border: "none", background: "transparent", cursor: "pointer", flexShrink: 0 }} />
                   </div>
-                  <input placeholder="세부 시간 (예: 6:30-13:30 / 14:00-19:00)" value={newShiftTime} onChange={(e) => setNewShiftTime(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 12, marginBottom: 6 }} />
-                  <button onClick={handleRegisterCustomShift} style={{ width: "100%", background: INDIGO, color: "#fff", border: "none", borderRadius: 8, padding: "7px 0", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>이 조 등록하고 선택하기</button>
+                  <input placeholder="세부 시간 (예: 6:30-13:30 / 14:00-19:00)" value={newShiftTime} onChange={(e) => setNewShiftTime(e.target.value)} style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 12, boxSizing: "border-box" }} />
+                  <button onClick={handleRegisterCustomShift} style={{ width: "100%", background: INDIGO, color: "#fff", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>이 조 등록하고 선택하기</button>
                 </div>
               )}
 
@@ -1957,7 +1958,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (커스텀 조 프리셋 삭제 및 관리 섹션 추가 완료) ----------
+// ---------- Settings modal (설정 창 내 커스텀 조 ✕ 버튼 삭제 관리 섹션 탑재) ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
@@ -2001,7 +2002,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
     onPatch({ customLabels: next });
   };
 
-  // ✅ [신규] 설정 창 내 커스텀 조 삭제 함수
+  // ✅ [신규 구현] 설정 창 내 커스텀 조 삭제 함수
   const handleDeleteCustomShift = (key) => {
     const next = { ...customShifts };
     delete next[key];
@@ -2031,10 +2032,10 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
-          {/* ✅ [신규] 설정 창 내 커스텀 조(Shift) 프리셋 관리 섹션 */}
+          {/* ✅ [신규] 설정 창 내 커스텀 조(Shift) 프리셋 관리 섹션 (✕ 버튼으로 삭제 가능) */}
           <SectionTitle>커스텀 조(Shift) 프리셋 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
-            등록된 조 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요. 필요 없는 조를 깔끔하게 정리해 보세요.
+            등록된 커스텀 조 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요.
           </div>
           {Object.keys(customShifts).length > 0 ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
