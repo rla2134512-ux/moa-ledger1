@@ -1651,12 +1651,12 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
                   <div style={{ display: "flex", gap: 6, width: "100%", boxSizing: "border-box" }}>
-                    <input placeholder="코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, minWidth: 0, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11, boxSizing: "border-box" }} />
-                    <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1.2, minWidth: 0, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11, boxSizing: "border-box" }} />
+                    <input placeholder="조 코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, minWidth: 0, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11.5, boxSizing: "border-box" }} />
+                    <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1.2, minWidth: 0, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11.5, boxSizing: "border-box" }} />
                     <input type="color" value={newShiftColor} onChange={(e) => setNewShiftColor(e.target.value)} style={{ width: 32, height: 32, border: "none", background: "transparent", cursor: "pointer", flexShrink: 0 }} />
                   </div>
-                  <input placeholder="세부 시간 (예: 6:30-13:30 / 14:00-19:00)" value={newShiftTime} onChange={(e) => setNewShiftTime(e.target.value)} style={{ width: "100%", maxWidth: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11, boxSizing: "border-box" }} />
-                  <button onClick={handleRegisterCustomShift} style={{ width: "100%", background: INDIGO, color: "#fff", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", boxSizing: "border-box" }}>이 조 등록하고 선택하기</button>
+                  <input placeholder="세부 시간 (예: 6:30-13:30 / 14:00-19:00)" value={newShiftTime} onChange={(e) => setNewShiftTime(e.target.value)} style={{ width: "100%", maxWidth: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "7px 8px", fontSize: 11.5, boxSizing: "border-box" }} />
+                  <button onClick={handleRegisterCustomShift} style={{ width: "100%", background: INDIGO, color: "#fff", border: "none", borderRadius: 8, padding: "7px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", boxSizing: "border-box" }}>이 조 등록하고 선택하기</button>
                 </div>
               )}
 
@@ -2063,7 +2063,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
-          {/* ✅ [근무 조 관리 및 삭제 섹션] 기본 조와 커스텀 조 모두 ✕ 버튼으로 삭제 가능 */}
+          {/* ✅ [신규] 설정 창 내 근무 조(Shift) 프리셋 관리 섹션 (기본 조 및 커스텀 조 모두 ✕ 버튼으로 삭제 가능) */}
           <SectionTitle>근무 조(Shift) 프리셋 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
             등록된 조 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요.
