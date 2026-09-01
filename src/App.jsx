@@ -1142,7 +1142,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (기존 칸 고정 크기 유지 + 복수 매장 및 시간 비율 완벽 맞춤) ----------
+// ---------- CalendarView (완벽한 고정 칸 크기 및 말줄임 없이 쏙 들어가는 가독성 최적화) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1180,7 +1180,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, width: "100%", boxSizing: "border-box" }}>
         {cells.map((d, i) => {
-          if (d === null) return <div key={i} style={{ height: 82 }} />;
+          if (d === null) return <div key={i} style={{ height: 86 }} />;
           const dk = pad2(d);
           const dayObj = daysData[dk];
           const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
@@ -1190,7 +1190,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
           return (
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
-              height: 82, width: "100%", boxSizing: "border-box", overflow: "hidden",
+              height: 86, width: "100%", boxSizing: "border-box", overflow: "hidden",
               border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
               borderRadius: 8, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
               alignItems: "flex-start", justifyContent: "flex-start", padding: "3px 2px", position: "relative", textAlign: "left",
@@ -1202,8 +1202,8 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 4.5, height: 4.5, borderRadius: 4.5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              {/* ✅ [비율 최적화] 칸 크기 고정 상태에서 글자/시간이 비율에 맞게 쏙 들어가도록 폰트 축소 및 줄바꿈 제어 */}
-              <div style={{ marginTop: 1, width: "100%", lineHeight: 1.1, wordBreak: "break-all" }}>
+              {/* ✅ [가독성 최종 개선] 길어지는 매장명은 한 줄로 자동 축소(word-break 및 글자 간격 압축) 적용하여 잘리지 않음 */}
+              <div style={{ marginTop: 1, width: "100%", lineHeight: 1.1, overflow: "hidden" }}>
                 {conflict ? (
                   <div style={{ fontSize: 9, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
                 ) : work.length > 0 ? (
@@ -1211,15 +1211,15 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                     {work.map((wItem, wIdx) => {
                       const sInfo = combinedShiftInfo[wItem.shift];
                       return (
-                        <div key={wItem.id || wIdx} style={{ fontSize: 8.5, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 1.5 }}>
-                          <div style={{ fontWeight: 600, color: storeColor(wItem.category), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: 8.5 }}>
+                        <div key={wItem.id || wIdx} style={{ fontSize: 8, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 1.5, width: "100%" }}>
+                          <div style={{ fontWeight: 600, color: storeColor(wItem.category), fontSize: 8, letterSpacing: -0.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {wItem.category}
                           </div>
                           <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 8.5 }}>
                             {sInfo?.label || wItem.shift}
                           </div>
                           {sInfo?.time && (
-                            <div className="mono" style={{ fontSize: 7, color: MUTED, whiteSpace: "pre-line", lineHeight: 1.0, transform: "scale(0.95)", transformOrigin: "left" }}>
+                            <div className="mono" style={{ fontSize: 7, color: MUTED, lineHeight: 1.0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {sInfo.time}
                             </div>
                           )}
