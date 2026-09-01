@@ -1142,7 +1142,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (시간 및 복수 조 깔끔한 출력 최적화) ----------
+// ---------- CalendarView (모바일 세로 비율 및 시간 표시 최적화) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1178,9 +1178,9 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         {WEEK_LABELS.map((w) => <div key={w} style={{ textAlign: "center", fontSize: 11, color: MUTED, fontWeight: 600, padding: "4px 0" }}>{w}</div>)}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 5, width: "100%", boxSizing: "border-box" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, width: "100%", boxSizing: "border-box" }}>
         {cells.map((d, i) => {
-          if (d === null) return <div key={i} style={{ minHeight: 110 }} />;
+          if (d === null) return <div key={i} style={{ minHeight: 92 }} />;
           const dk = pad2(d);
           const dayObj = daysData[dk];
           const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
@@ -1190,36 +1190,36 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
           return (
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
-              minHeight: 110, width: "100%", boxSizing: "border-box",
+              minHeight: 92, width: "100%", boxSizing: "border-box",
               border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
-              borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
-              alignItems: "flex-start", justifyContent: "flex-start", padding: "5px 4px", position: "relative", textAlign: "left",
+              borderRadius: 8, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
+              alignItems: "flex-start", justifyContent: "flex-start", padding: "4px 3px", position: "relative", textAlign: "left",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
                   {d}
                 </span>
-                {dayObj?.label && <span style={{ width: 6, height: 6, borderRadius: 6, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
+                {dayObj?.label && <span style={{ width: 5, height: 5, borderRadius: 5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              {/* ✅ [화면 표시 개선] 매장명, 조 이름, 세부 시간까지 스크린샷 느낌처럼 칸 안에 완벽하게 표현 */}
+              {/* ✅ [모바일 화면 맞춤형 최적화] 칸이 너무 길어져 화면을 넘지 않도록 간격과 폰트 크기 조정 */}
               <div style={{ marginTop: 2, width: "100%", lineHeight: 1.15, wordBreak: "break-all" }}>
                 {conflict ? (
-                  <div style={{ fontSize: 10, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
                 ) : work.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     {work.map((wItem, wIdx) => {
                       const sInfo = combinedShiftInfo[wItem.shift];
                       return (
-                        <div key={wItem.id || wIdx} style={{ fontSize: 9.5, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 2 }}>
+                        <div key={wItem.id || wIdx} style={{ fontSize: 9, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 2 }}>
                           <div style={{ fontWeight: 600, color: storeColor(wItem.category), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {wItem.category}
                           </div>
-                          <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 9.5 }}>
+                          <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 9 }}>
                             {sInfo?.label || wItem.shift}
                           </div>
                           {sInfo?.time && (
-                            <div className="mono" style={{ fontSize: 8, color: MUTED, whiteSpace: "pre-line", lineHeight: 1.1, marginTop: 1 }}>
+                            <div className="mono" style={{ fontSize: 7.5, color: MUTED, whiteSpace: "pre-line", lineHeight: 1.05, marginTop: 0.5 }}>
                               {sInfo.time}
                             </div>
                           )}
@@ -1229,8 +1229,8 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                   </div>
                 ) : dayObj?.label ? (
                   <>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
-                    {dayObj.memo && <div style={{ fontSize: 9, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
+                    <div style={{ fontSize: 9.5, fontWeight: 600, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 8.5, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
                   </>
                 ) : null}
               </div>
@@ -1893,7 +1893,7 @@ function MiniStatCard({ label, value, color }) {
   );
 }
 
-// ---------- Analysis ----------
+// ---------- Analysis (모바일 브라우저 렌더링 오류 방지 고정 높이 래퍼 적용) ----------
 function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearScanLoaded }) {
   const data = EXPENSE_CATS.filter((c) => c.key !== ASSET_CAT && monthTotals.byCat[c.key] > 0).map((c) => ({ name: c.key, value: monthTotals.byCat[c.key] || 0, color: c.color }));
   const hasData = data.length > 0;
@@ -1908,8 +1908,8 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>{year}년 월별 급여 추이</div>
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         {hasYearData ? (
-          <div style={{ width: "100%", height: 180 }}>
-            <ResponsiveContainer>
+          <div style={{ width: "100%", height: 180, position: "relative" }}>
+            <ResponsiveContainer width="100%" height={180}>
               <BarChart data={monthlySeries} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke={PAPER_LINE} />
                 <XAxis dataKey="month" tick={{ fontSize: 10, fill: MUTED }} axisLine={{ stroke: PAPER_LINE }} tickLine={false} />
@@ -1935,8 +1935,8 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>카테고리별 지출 비중</div>
         {hasData ? (
-          <div style={{ width: "100%", height: 220 }}>
-            <ResponsiveContainer>
+          <div style={{ width: "100%", height: 220, position: "relative" }}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={data} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
                   {data.map((d, i) => <Cell key={i} fill={d.color} stroke={CARD} strokeWidth={2} />)}
