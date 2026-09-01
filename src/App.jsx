@@ -43,7 +43,7 @@ const DEFAULT_TODO_CATS = [
   { id: "c5", name: "학교", color: "#0F6B5C" },
 ];
 
-const LABELS = [
+const DEFAULT_LABELS = [
   { key: "휴무", color: "#6B7A8F" }, { key: "면접", color: "#3B5BA5" },
   { key: "스터디", color: "#0F6B5C" }, { key: "알바", color: "#B08D57" },
   { key: "기타", color: "#9A9284" },
@@ -98,7 +98,10 @@ function storeColor(name, customStores = []) {
   for (let i = 0; i < (name || "").length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 997;
   return CUSTOM_STORE_PALETTE[hash % CUSTOM_STORE_PALETTE.length];
 }
-function labelColorOf(name) { return (LABELS.find((l) => l.key === name) || {}).color || MUTED; }
+function labelColorOf(name, customLabels = []) {
+  const allLabels = [...DEFAULT_LABELS, ...customLabels];
+  return (allLabels.find((l) => l.key === name) || {}).color || MUTED;
+}
 
 function computeConflict(entries) {
   const work = (entries || []).filter((e) => e.shift && SHIFT_SLOTS[e.shift]);
@@ -115,6 +118,7 @@ const DEFAULT_SETTINGS = {
   fixedRates: { one: ONE_SHIFT, two: TWO_SHIFT },
   hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
   customStores: [], hiddenStores: [],
+  customLabels: [], // 커스텀 라벨 저장소
   todoCats: DEFAULT_TODO_CATS,
   routines: [], todos: [], 
 };
@@ -363,6 +367,10 @@ export default function App() {
   const realToday = new Date();
   const [year, setYear] = useState(realToday.getFullYear());
   const [month, setMonth] = useState(realToday.getMonth());
+  // 정산 탭 전용 월/연도 상태 추가 (기본값: 현재 연/월)
+  const [reportYear, setReportYear] = useState(realToday.getFullYear());
+  const [reportMonth, setReportMonth] = useState(realToday.getMonth());
+
   const [tab, setTab] = useState("calendar");
   const [selectedPlannerDate, setSelectedPlannerDate] = useState(dateStrKey(realToday.getFullYear(), realToday.getMonth(), realToday.getDate()));
 
@@ -416,7 +424,10 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => { (async () => { setLoading(true); setSettings(await loadSettings()); setLoading(false); })(); }, []);
+  
+  // 캘린더/플래너용 월 및 정산용 월 모두 보장
   useEffect(() => { if (!loading) ensureMonth(year, month); }, [year, month, ensureMonth, loading]);
+  useEffect(() => { if (!loading) ensureMonth(reportYear, reportMonth); }, [reportYear, reportMonth, ensureMonth, loading]);
   
   const handleSelectPlannerDate = async (ds) => {
     setSelectedPlannerDate(ds);
@@ -463,20 +474,21 @@ export default function App() {
     saveTodos([...otherTodos, ...dateTodos]);
   };
 
-  const prevMonthIndex = month === 0 ? 11 : month - 1;
-  const prevMonthYear = month === 0 ? year - 1 : year;
-  const prevData = cache[monthKey(prevMonthYear, prevMonthIndex)] || { days: {} };
-  const prevGross = useMemo(() => {
+  // 정산 탭용 선택된 월의 직전 달 데이터 계산 (실수령액 연동)
+  const reportPrevMonthIndex = reportMonth === 0 ? 11 : reportMonth - 1;
+  const reportPrevMonthYear = reportMonth === 0 ? reportYear - 1 : reportYear;
+  const reportPrevData = cache[monthKey(reportPrevMonthYear, reportPrevMonthIndex)] || { days: {} };
+  const reportPrevGross = useMemo(() => {
     let sum = 0;
-    Object.values(prevData.days || {}).forEach((d) => (d.entries || []).forEach((e) => { if (e.type === "income") sum += e.amount; }));
+    Object.values(reportPrevData.days || {}).forEach((d) => (d.entries || []).forEach((e) => { if (e.type === "income") sum += e.amount; }));
     return sum;
-  }, [prevData]);
-  const prevNet = prevGross * (1 - taxRate);
+  }, [reportPrevData]);
+  const reportPrevNet = reportPrevGross * (1 - taxRate);
 
   const [yearScan, setYearScan] = useState({});
   const [yearScanLoaded, setYearScanLoaded] = useState(false);
   
-  // ✅ [흰 화면 방지] 정산/분석 탭에서 yearScan 안전하게 집계
+  // ✅ [버그 수정] 9월 포함 연간 모든 데이터 누락 없이 완벽 스캔
   useEffect(() => {
     if (tab !== "report" && tab !== "analysis") return;
     let cancelled = false;
@@ -486,7 +498,9 @@ export default function App() {
       if (cancelled) return;
       const perMonth = {};
       for (let m = 1; m <= 12; m++) {
-        const data = all[monthKey(year, m - 1)];
+        // 캐시와 저장소 모두 비교 검토하여 누락 방지
+        const cachedData = cache[monthKey(year, m - 1)];
+        const data = cachedData || all[monthKey(year, m - 1)];
         let gross = 0;
         if (data && data.days) {
           Object.values(data.days).forEach((day) => (day.entries || []).forEach((e) => { if (e.type === "income") gross += e.amount; }));
@@ -500,11 +514,20 @@ export default function App() {
   }, [tab, year, cache]);
 
   const curData = cache[monthKey(year, month)] || { days: {} };
+  // 정산 탭 전용 데이터
+  const reportCurData = cache[monthKey(reportYear, reportMonth)] || { days: {} };
 
   const changeMonth = (delta) => {
     let m = month + delta, y = year;
     if (m < 0) { m = 11; y -= 1; } else if (m > 11) { m = 0; y += 1; }
     setMonth(m); setYear(y);
+  };
+
+  // 정산 탭 전용 월 변경 함수
+  const changeReportMonth = (delta) => {
+    let m = reportMonth + delta, y = reportYear;
+    if (m < 0) { m = 11; y -= 1; } else if (m > 11) { m = 0; y += 1; }
+    setReportMonth(m); setReportYear(y);
   };
 
   const mutateDay = async (dayNum, mutator) => {
@@ -549,6 +572,35 @@ export default function App() {
     const totalGeun = countA + countC + countFull * 2;
     return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size, totalGeun } };
   }, [curData, taxRate]);
+
+  // 정산 탭 전용 월별 집계 데이터 (정산 탭에서 선택한 월 기준)
+  const reportMonthTotals = useMemo(() => {
+    let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
+    const workDaySet = new Set();
+    const byCat = {};
+    if (reportCurData && reportCurData.days) {
+      Object.entries(reportCurData.days).forEach(([dk, d]) => (d.entries || []).forEach((e) => {
+        if (e.type === "income") {
+          gross += e.amount;
+          if (e.shift && SHIFT_SLOTS[e.shift]) {
+            workDaySet.add(dk);
+            if (COMBO_SHIFTS.has(e.shift)) {
+              countFull++;
+            } else if (e.shift === "C") {
+              countC++;
+            } else {
+              countA++;
+            }
+          }
+        } else {
+          if (e.category === ASSET_CAT) asset += e.amount; else expense += e.amount;
+          byCat[e.category] = (byCat[e.category] || 0) + e.amount;
+        }
+      }));
+    }
+    const totalGeun = countA + countC + countFull * 2;
+    return { gross, expense, asset, byCat, net: gross * (1 - taxRate), workStats: { countA, countC, countFull, workDays: workDaySet.size, totalGeun } };
+  }, [reportCurData, taxRate]);
 
   const yearTotals = useMemo(() => {
     const gross = Object.values(yearScan).reduce((a, b) => a + b, 0);
@@ -773,6 +825,7 @@ export default function App() {
                 year={year} month={month} changeMonth={changeMonth} daysData={curData.days || {}}
                 onSelectDay={setSelectedDay} onSaveWallpaper={saveWallpaper} onCopyOffDays={copyOffDaysText}
                 onOpenImportModal={() => setImportModalOpen(true)}
+                customLabels={settings.customLabels || []}
               />
             )}
             {tab === "daily" && (
@@ -791,13 +844,14 @@ export default function App() {
             )}
             {tab === "report" && (
               <ReportView
-                year={year} setYear={setYear} month={month} isCurrentMonth={isCurrentMonth}
-                monthTotals={monthTotals} yearTotals={yearTotals} goal={goal} savingGoal={savingGoal}
-                achieveRate={achieveRate} remaining={remaining} shiftsNeeded={shiftsNeeded}
+                reportYear={reportYear} reportMonth={reportMonth} changeReportMonth={changeReportMonth}
+                isCurrentMonth={reportYear === realToday.getFullYear() && reportMonth === realToday.getMonth()}
+                monthTotals={reportMonthTotals} yearTotals={yearTotals} goal={goal} savingGoal={savingGoal}
+                achieveRate={Math.min(100, (reportMonthTotals.gross / goal) * 100)} remaining={Math.max(0, goal - reportMonthTotals.gross)}
                 goalEdit={goalEdit} setGoalEdit={setGoalEdit} goalInput={goalInput} setGoalInput={setGoalInput} commitGoal={commitGoal}
                 savingGoalEdit={savingGoalEdit} setSavingGoalEdit={setSavingGoalEdit} savingGoalInput={savingGoalInput} setSavingGoalInput={setSavingGoalInput} commitSavingGoal={commitSavingGoal}
                 expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday}
-                taxMode={settings.taxMode} payday={settings.payday || DEFAULT_PAYDAY} prevNet={prevNet}
+                taxMode={settings.taxMode} payday={settings.payday || DEFAULT_PAYDAY} prevNet={reportPrevNet}
               />
             )}
             {tab === "analysis" && <AnalysisView monthTotals={monthTotals} monthlySeries={monthlySeries} yearTotals={yearTotals} year={year} yearScanLoaded={yearScanLoaded} />}
@@ -825,6 +879,7 @@ export default function App() {
             todos={settings.todos || []}
             onToggleTodo={toggleTodo}
             onDeleteTodo={deleteTodo}
+            onPatchSettings={patchSettings}
           />
         )}
 
@@ -957,7 +1012,7 @@ function DailyPlannerView({ realToday, selectedDateStr, onSelectDateStr, ensureM
             </span>
           </div>
         ) : selDayData.label ? (
-          <div style={{ fontSize: 14, fontWeight: 700, color: labelColorOf(selDayData.label) }}>{selDayData.label}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: labelColorOf(selDayData.label, settings.customLabels) }}>{selDayData.label}</div>
         ) : (
           <div style={{ fontSize: 12.5, color: MUTED }}>등록된 일정이 없어요. 캘린더에서 클릭해 추가해보세요.</div>
         )}
@@ -1084,13 +1139,15 @@ function InstallBanner() {
 }
 
 // ---------- CalendarView ----------
-function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal }) {
+function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [] }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
   const cells = [];
   for (let i = 0; i < fw; i++) cells.push(null);
   for (let d = 1; d <= dim; d++) cells.push(d);
   const isToday = (d) => { const t = new Date(); return d === t.getDate() && month === t.getMonth() && year === t.getFullYear(); };
+
+  const allLabels = [...DEFAULT_LABELS, ...customLabels];
 
   return (
     <div style={{ padding: "14px 14px 100px" }}>
@@ -1118,7 +1175,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 5, width: "100%", boxSizing: "border-box" }}>
         {cells.map((d, i) => {
-          if (d === null) return <div key={i} style={{ minHeight: 92 }} />;
+          if (d === null) return <div key={i} style={{ minHeight: 96 }} />;
           const dk = pad2(d);
           const dayObj = daysData[dk];
           const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
@@ -1128,34 +1185,39 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
           return (
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
-              minHeight: 92, width: "100%", boxSizing: "border-box",
+              minHeight: 96, width: "100%", boxSizing: "border-box",
               border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
               borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
-              alignItems: "flex-start", justifyContent: "flex-start", padding: "6px 5px", position: "relative", textAlign: "left",
+              alignItems: "flex-start", justifyContent: "flex-start", padding: "5px 4px", position: "relative", textAlign: "left",
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-                <span className="mono" style={{ fontSize: 13, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
+                <span className="mono" style={{ fontSize: 12.5, fontWeight: isToday(d) ? 700 : 600, color: isToday(d) ? GOLD : (wd === 0 ? EXPENSE : wd === 6 ? INDIGO : INK) }}>
                   {d}
                 </span>
-                {dayObj?.label && <span style={{ width: 7, height: 7, borderRadius: 7, background: labelColorOf(dayObj.label), flexShrink: 0 }} />}
+                {dayObj?.label && <span style={{ width: 6, height: 6, borderRadius: 6, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              <div style={{ marginTop: 4, width: "100%", lineHeight: 1.25, wordBreak: "break-all" }}>
+              {/* ✅ [가독성 개선] 복수 근무/매장명이 겹치지 않고 줄바꿈되어 모두 표시되도록 렌더링 최적화 */}
+              <div style={{ marginTop: 3, width: "100%", lineHeight: 1.2, wordBreak: "break-all" }}>
                 {conflict ? (
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: EXPENSE }}>⚠️ 시간대 중복</div>
-                ) : work.length ? (
-                  <>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: storeColor(work[0].category), lineHeight: 1.2 }}>
-                      {work[0].category}
-                    </div>
-                    <div className="mono" style={{ fontSize: 11, fontWeight: 700, color: SHIFT_INFO[work[0].shift]?.color, marginTop: 2 }}>
-                      {SHIFT_INFO[work[0].shift]?.label}{work.length > 1 ? ` 외${work.length - 1}` : ""}
-                    </div>
-                  </>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
+                ) : work.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    {work.map((wItem, wIdx) => (
+                      <div key={wItem.id || wIdx} style={{ fontSize: 9.5, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 2 }}>
+                        <div style={{ fontWeight: 600, color: storeColor(wItem.category), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {wItem.category}
+                        </div>
+                        <div className="mono" style={{ fontWeight: 700, color: SHIFT_INFO[wItem.shift]?.color || INK, fontSize: 9.5 }}>
+                          {SHIFT_INFO[wItem.shift]?.label || wItem.shift}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : dayObj?.label ? (
                   <>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: labelColorOf(dayObj.label) }}>{dayObj.label}</div>
-                    {dayObj.memo && <div style={{ fontSize: 9.5, color: MUTED }}>{dayObj.memo}</div>}
+                    <div style={{ fontSize: 10, fontWeight: 600, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 9, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
                   </>
                 ) : null}
               </div>
@@ -1164,8 +1226,8 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
         })}
       </div>
 
-      <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
-        {LABELS.map((l) => (<div key={l.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: MUTED }}><span style={{ width: 6, height: 6, borderRadius: 6, background: l.color, display: "inline-block" }} />{l.key}</div>))}
+      <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+        {allLabels.map((l) => (<div key={l.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: MUTED }}><span style={{ width: 6, height: 6, borderRadius: 6, background: l.color, display: "inline-block" }} />{l.key}</div>))}
       </div>
       <div style={{ marginTop: 10, fontSize: 12, color: MUTED, textAlign: "center" }}>날짜를 눌러 근무·지출·일정을 기록하세요 · 왼쪽으로 스와이프하면 오늘 플래너가 열려요</div>
     </div>
@@ -1204,7 +1266,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
 
     const isExcel = f.name.endsWith(".xlsx") || f.name.endsWith(".xls") || f.name.endsWith(".csv");
     if (!isExcel) {
-      setErrorMsg("사진 파싱은 현재 엑셀(.xlsx) 파일 스캔만 지원합니다. 엑셀 스케줄표 파일을 선택해 주세요!");
+      setErrorMsg("현재 엑셀(.xlsx) 파일 스캔만 지원합니다. 엑셀 스케줄표 파일을 선택해 주세요!");
       return;
     }
 
@@ -1230,7 +1292,6 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
 
         const mapResult = {};
         let foundUser = false;
-
         let nameColIndex = -1;
         let dayColIndex = -1;
         let headerRowIndex = -1;
@@ -1329,7 +1390,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
           <button onClick={() => fileRef.current?.click()} style={{ width: "100%", border: `1.5px dashed ${INDIGO}`, borderRadius: 12, padding: "16px 0", textAlign: "center", background: "#FCFAF5", cursor: "pointer", marginBottom: 14 }}>
             <Upload size={20} color={INDIGO} style={{ margin: "0 auto 6px" }} />
             <div style={{ fontSize: 13, fontWeight: 600, color: INK }}>{file ? file.name : "엑셀(.xlsx) 파일 선택하기"}</div>
-            <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>불가리, 크리드, C&P 등 백화점 근무표 자동 인식</div>
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>백화점 근무표 자동 인식</div>
           </button>
           <input ref={fileRef} type="file" accept=".xlsx, .xls, .csv" style={{ display: "none" }} onChange={handleFileChange} />
 
@@ -1364,7 +1425,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
 }
 
 // ---------- DayModal ----------
-function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo }) {
+function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo, onPatchSettings }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
   const [memo, setMemo] = useState("");
@@ -1378,9 +1439,14 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [todoInput, setTodoInput] = useState("");
   const [selCatId, setSelCatId] = useState(settings.todoCats?.[0]?.id || "c1");
 
+  // ✅ [신규] 오늘 라벨 직접 입력 상태
+  const [customLabelInput, setCustomLabelInput] = useState("");
+
   const dateStr = dateStrKey(year, month, day);
   const dateTodos = (todos || []).filter((t) => t.dateStr === dateStr);
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
+  const customLabels = settings.customLabels || [];
+  const allLabels = [...DEFAULT_LABELS, ...customLabels];
 
   const hiddenStores = settings.hiddenStores || [];
   const activeDefaults = DEFAULT_STORE_PRESETS.filter((s) => !hiddenStores.includes(s.name));
@@ -1410,6 +1476,22 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   };
   const pickLabel = (key) => onMeta({ label: dayObj.label === key ? null : key });
   const blurDayMemo = () => { if (dayMemo !== (dayObj.memo || "")) onMeta({ memo: dayMemo }); };
+
+  // ✅ [신규] 라벨 직접 추가 후 바로 선택
+  const handleAddCustomLabel = () => {
+    const trimmed = customLabelInput.trim();
+    if (!trimmed) return;
+    if (allLabels.some((l) => l.key === trimmed)) {
+      pickLabel(trimmed);
+      setCustomLabelInput("");
+      return;
+    }
+    const newLbl = { key: trimmed, color: "#4A7A8C" };
+    const updated = [...customLabels, newLbl];
+    onPatchSettings({ customLabels: updated });
+    onMeta({ label: trimmed });
+    setCustomLabelInput("");
+  };
 
   const handleAddTodoSubmit = () => {
     if (!todoInput.trim()) return;
@@ -1449,12 +1531,18 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
             </div>
           )}
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>오늘 라벨</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-            {LABELS.map((l) => (
+          <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8, letterSpacing: 0.5 }}>오늘 라벨 (예비군, 중요 일정 등 직접 입력 가능)</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {allLabels.map((l) => (
               <button key={l.key} onClick={() => pickLabel(l.key)} style={{ padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${dayObj.label === l.key ? l.color : PAPER_LINE}`, background: dayObj.label === l.key ? l.color : "transparent", color: dayObj.label === l.key ? "#fff" : INK }}>{l.key}</button>
             ))}
           </div>
+          {/* ✅ [신규] 라벨 직접 입력 인풋 */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <input placeholder="새 라벨 직접 입력 (예: 예비군)" value={customLabelInput} onChange={(e) => setCustomLabelInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleAddCustomLabel(); }} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "7px 10px", fontSize: 12.5 }} />
+            <button onClick={handleAddCustomLabel} style={{ background: INDIGO, color: "#fff", border: "none", borderRadius: 10, padding: "0 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>추가</button>
+          </div>
+
           <input placeholder="오늘의 메모 (예: 면접 2차 통과)" value={dayMemo} onChange={(e) => setDayMemo(e.target.value)} onBlur={blurDayMemo}
             style={{ width: "100%", border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 20 }} />
 
@@ -1623,12 +1711,12 @@ function DailyBudgetCard({ isCurrentMonth, monthTotals, expenseToDate, todaySpen
   );
 }
 
-function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, shiftsNeeded, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday, prevNet }) {
+// ---------- ReportView (월별 네비게이션 및 실시간 연동 완료) ----------
+function ReportView({ reportYear, reportMonth, changeReportMonth, isCurrentMonth, monthTotals, yearTotals, goal, savingGoal, achieveRate, remaining, goalEdit, setGoalEdit, goalInput, setGoalInput, commitGoal, savingGoalEdit, setSavingGoalEdit, savingGoalInput, setSavingGoalInput, commitSavingGoal, expenseToDate, todaySpent, realToday, taxMode, payday, prevNet }) {
   const fixedTotal = monthTotals.byCat[FIXED_CAT] || 0;
   const taxInfo = TAX_MODES[taxMode] || TAX_MODES["3.3"];
   const ws = monthTotals.workStats;
 
-  // 급여일 카운트다운 로직
   const currentToday = new Date();
   let targetPayday = new Date(currentToday.getFullYear(), currentToday.getMonth(), payday);
   const isNextMonth = currentToday.getDate() > payday;
@@ -1637,11 +1725,10 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
   }
   
   const diffDays = Math.ceil((targetPayday - currentToday) / (1000 * 60 * 60 * 24));
-  const displayMonth = currentToday.getDate() > payday ? currentToday.getMonth() + 1 : currentToday.getMonth(); // 8월 기준 8월 급여
+  const displayMonth = currentToday.getDate() > payday ? currentToday.getMonth() + 1 : currentToday.getMonth();
 
   return (
     <div style={{ padding: "16px 20px 100px" }}>
-      {/* 상단 공지 박스: 8월 급여 입금일 및 실수령액 연동 */}
       <div style={{ background: INK, color: "#fff", borderRadius: 14, padding: "12px 16px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
@@ -1656,16 +1743,17 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         </div>
       </div>
 
+      {/* ✅ [신규] 정산 탭 전용 월별 네비게이션 (< / >) */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div className="display" style={{ fontSize: 19, fontWeight: 700 }}>정산</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={() => setYear(year - 1)} style={{ padding: 4, background: "transparent", border: "none" }}><ChevronLeft size={16} /></button>
-          <span className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{year}년</span>
-          <button onClick={() => setYear(year + 1)} style={{ padding: 4, background: "transparent", border: "none" }}><ChevronRight size={16} /></button>
+          <button onClick={() => changeReportMonth(-1)} style={{ padding: 4, background: "transparent", border: "none", cursor: "pointer" }}><ChevronLeft size={20} color={INK} /></button>
+          <span className="mono" style={{ fontSize: 15, fontWeight: 700 }}>{reportYear}년 {reportMonth + 1}월</span>
+          <button onClick={() => changeReportMonth(1)} style={{ padding: 4, background: "transparent", border: "none", cursor: "pointer" }}><ChevronRight size={20} color={INK} /></button>
         </div>
       </div>
 
-      <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={year} month={month} savingGoal={savingGoal} />
+      <DailyBudgetCard isCurrentMonth={isCurrentMonth} monthTotals={monthTotals} expenseToDate={expenseToDate} todaySpent={todaySpent} realToday={realToday} year={reportYear} month={reportMonth} savingGoal={savingGoal} />
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
         <div style={{ flex: 1, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 14 }}>
@@ -1703,7 +1791,7 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
         </div>
       </div>
 
-      <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>이번 달 출근 현황</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>{reportMonth + 1}월 출근 현황</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A.color} />
         <MiniStatCard label="C조" value={ws.countC} color={SHIFT_INFO.C.color} />
@@ -1711,13 +1799,11 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
       </div>
       <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 출근 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.totalGeun}근</span> <span style={{ color: "#C9BFA8" }}>(A/C조는 2근으로 계산)</span></div>
 
-      {/* 하단 상세 정산 카드 (여기에 실수령액과 급여 내역이 정상 출력되도록 복구함) */}
-      <div className="display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{`<${displayMonth}월 급여 실수령액>`}</div>
+      <div className="display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{`<${reportMonth + 1}월 급여 실수령액>`}</div>
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-        <Row label="입금 예정 실수령액" value={prevNet} color={INCOME} bold big />
-        <div style={{ height: 1, background: PAPER_LINE, margin: "10px 0" }} />
-        <Row label="세전 총수당" value={monthTotals.gross} color={INK} />
+        <Row label="세전 총수당" value={monthTotals.gross} color={INCOME} />
         <Row label={`${taxInfo.label} 공제`} value={-(monthTotals.gross * taxInfo.rate)} color={EXPENSE} />
+        <Row label="세후 실수령액" value={monthTotals.net} color={INK} bold big />
         <div style={{ height: 1, background: PAPER_LINE, margin: "10px 0" }} />
         <Row label="고정비" value={-fixedTotal} color={EXPENSE} />
         <Row label="변동 지출" value={-(monthTotals.expense - fixedTotal)} color={EXPENSE} />
@@ -1730,11 +1816,11 @@ function ReportView({ year, setYear, month, isCurrentMonth, monthTotals, yearTot
           <InfoTip text="매 수당에서 자동 공제되는 세액을 모아 보여드려요. 5월 종합소득세 신고 시 환급 또는 추가납부를 참고하는 용도예요." />
         </div>
         <Row label={`이번 달 ${taxInfo.label}`} value={monthTotals.gross * taxInfo.rate} color={EXPENSE} bold />
-        <Row label={`${year}년 누적 ${taxInfo.label}`} value={yearTotals.tax} color={INK} bold big />
+        <Row label={`${reportYear}년 누적 ${taxInfo.label}`} value={yearTotals.tax} color={INK} bold big />
       </div>
 
       <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 16, padding: 18 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>{year}년 연간 누적 (종합소득세 신고용)</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 10 }}>{reportYear}년 연간 누적 (종합소득세 신고용)</div>
         <Row label="연간 세전 총수당" value={yearTotals.gross} color={INCOME} />
         <Row label="연간 실수령 추정" value={yearTotals.net} color={INK} bold big />
       </div>
@@ -1844,6 +1930,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
   const allActiveStores = [...activeDefaults, ...activeCustoms];
 
   const todoCats = settings.todoCats || DEFAULT_TODO_CATS;
+  const customLabels = settings.customLabels || [];
 
   const handleAddTodoCat = () => {
     if (!newCatName.trim()) return;
@@ -1855,6 +1942,11 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
   const handleDeleteTodoCat = (id) => {
     const filtered = todoCats.filter((c) => c.id !== id);
     onPatch({ todoCats: filtered });
+  };
+
+  const handleDeleteCustomLabel = (key) => {
+    const next = customLabels.filter((l) => l.key !== key);
+    onPatch({ customLabels: next });
   };
 
   const submitRecurring = () => {
@@ -1880,6 +1972,20 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
+          {customLabels.length > 0 && (
+            <>
+              <SectionTitle>커스텀 라벨 관리</SectionTitle>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
+                {customLabels.map((l) => (
+                  <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1.3px solid ${l.color}`, color: l.color }}>
+                    {l.key}
+                    <button onClick={() => handleDeleteCustomLabel(l.key)} style={{ padding: 0, background: "transparent", border: "none", cursor: "pointer", display: "flex" }}><X size={12} color={l.color} /></button>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+
           <SectionTitle>플래너 카테고리 관리 (투두메이트 방식)</SectionTitle>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             {todoCats.map((cat) => (
@@ -1931,7 +2037,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
 
           <SectionTitle>매장 프리셋 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
-            등록된 매장 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요. 9월 등 매장이 완전히 바뀔 때 편하게 정리해 보세요.
+            등록된 매장 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요. 매장이 완전히 바뀔 때 편하게 정리해 보세요.
           </div>
           {allActiveStores.length > 0 ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
