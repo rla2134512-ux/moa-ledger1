@@ -69,6 +69,7 @@ const SHIFT_SLOTS = {
   A: ["morning"], A1: ["morning"], A2: ["morning"], C: ["afternoon"],
   AC: ["morning", "afternoon"], A1C: ["morning", "afternoon"], A2C: ["morning", "afternoon"],
 };
+const COMBO_SHIFTS = new Set(["AC", "A1C", "A2C"]);
 
 const DEFAULT_STORE_PRESETS = [
   { name: "T2 불가리팝업", color: "#B5432E" },
@@ -319,7 +320,7 @@ function generateCalendarPNG(year, month, daysData, customShifts = {}) {
 }
 function downloadDataUrl(filename, dataUrl) {
   const a = document.createElement("a");
-  a.href = url; a.download = filename;
+  a.href = dataUrl; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
