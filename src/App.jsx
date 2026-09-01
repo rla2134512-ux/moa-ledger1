@@ -320,7 +320,7 @@ function generateCalendarPNG(year, month, daysData, customShifts = {}) {
 }
 function downloadDataUrl(filename, dataUrl) {
   const a = document.createElement("a");
-  a.href = dataUrl; a.download = filename;
+  a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
@@ -1142,7 +1142,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView ----------
+// ---------- CalendarView (시간 및 복수 조 깔끔한 출력 최적화) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1180,7 +1180,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 5, width: "100%", boxSizing: "border-box" }}>
         {cells.map((d, i) => {
-          if (d === null) return <div key={i} style={{ minHeight: 96 }} />;
+          if (d === null) return <div key={i} style={{ minHeight: 110 }} />;
           const dk = pad2(d);
           const dayObj = daysData[dk];
           const work = dayObj ? (dayObj.entries || []).filter((e) => e.shift) : [];
@@ -1190,7 +1190,7 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
 
           return (
             <button key={i} onClick={() => onSelectDay(d)} className="cell-tap" style={{
-              minHeight: 96, width: "100%", boxSizing: "border-box",
+              minHeight: 110, width: "100%", boxSizing: "border-box",
               border: conflict ? `1.6px solid ${EXPENSE}` : isToday(d) ? `1.6px solid ${GOLD}` : `1px solid ${PAPER_LINE}`,
               borderRadius: 10, background: hasContent ? "#FCFAF5" : "transparent", display: "flex", flexDirection: "column",
               alignItems: "flex-start", justifyContent: "flex-start", padding: "5px 4px", position: "relative", textAlign: "left",
@@ -1202,7 +1202,8 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 6, height: 6, borderRadius: 6, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              <div style={{ marginTop: 3, width: "100%", lineHeight: 1.2, wordBreak: "break-all" }}>
+              {/* ✅ [화면 표시 개선] 매장명, 조 이름, 세부 시간까지 스크린샷 느낌처럼 칸 안에 완벽하게 표현 */}
+              <div style={{ marginTop: 2, width: "100%", lineHeight: 1.15, wordBreak: "break-all" }}>
                 {conflict ? (
                   <div style={{ fontSize: 10, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
                 ) : work.length > 0 ? (
@@ -1217,6 +1218,11 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                           <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 9.5 }}>
                             {sInfo?.label || wItem.shift}
                           </div>
+                          {sInfo?.time && (
+                            <div className="mono" style={{ fontSize: 8, color: MUTED, whiteSpace: "pre-line", lineHeight: 1.1, marginTop: 1 }}>
+                              {sInfo.time}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
