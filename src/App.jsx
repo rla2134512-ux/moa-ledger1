@@ -104,7 +104,7 @@ function labelColorOf(name, customLabels = []) {
 
 function computeConflict(entries, customShifts = {}) {
   const shiftMap = { ...DEFAULT_SHIFT_INFO, ...customShifts };
-  const work = (entries || []).filter((e) => e.shift && (SHIFT_SLOTS[e.shift] || e.shift));
+  const work = (entries || []).filter((e) => e.shift && (SHIFT_SLOTS[e.shift] || shiftMap[e.shift]));
   let morning = 0, afternoon = 0;
   work.forEach((e) => {
     const slots = SHIFT_SLOTS[e.shift] || (e.shift.includes("C") && !e.shift.includes("A") ? ["afternoon"] : ["morning"]);
@@ -120,7 +120,7 @@ const DEFAULT_SETTINGS = {
   hourlyRate: DEFAULT_HOURLY, dailyRate: DEFAULT_DAILY,
   customStores: [], hiddenStores: [],
   customLabels: [],
-  customShifts: {}, // { "A1C1": { label: "A1/C1", short: "A1/C1", color: "#3B5BA5", time: "6:30-13:30\n14:00-19:00" } }
+  customShifts: {},
   hiddenShifts: [],
   todoCats: DEFAULT_TODO_CATS,
   routines: [], todos: [], 
@@ -319,7 +319,7 @@ function generateCalendarPNG(year, month, daysData, customShifts = {}) {
 }
 function downloadDataUrl(filename, dataUrl) {
   const a = document.createElement("a");
-  a.href = dataUrl; a.download = filename;
+  a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
@@ -1262,7 +1262,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
     if (str === "A2") return "A2";
     if (str === "A" || str === "A조") return "A";
     if (str === "C" || str === "C조") return "C";
-    return str; // 커스텀 조 직접 허용
+    return str;
   };
 
   const handleFileChange = (e) => {
@@ -1432,7 +1432,7 @@ function ScheduleImportModal({ onClose, onImportBatch, settings }) {
   );
 }
 
-// ---------- DayModal (커스텀 조 및 라벨 직접 입력 지원) ----------
+// ---------- DayModal ----------
 function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete, onMeta, onAddStorePreset, onAddTodo, todos, onToggleTodo, onDeleteTodo, onPatchSettings }) {
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState(EXPENSE_CATS[0].key);
@@ -1448,8 +1448,6 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
   const [selCatId, setSelCatId] = useState(settings.todoCats?.[0]?.id || "c1");
 
   const [customLabelInput, setCustomLabelInput] = useState("");
-  
-  // ✅ [신규] 커스텀 조 직접 입력 모달 상태
   const [customShiftOpen, setCustomShiftOpen] = useState(false);
   const [newShiftKey, setNewShiftKey] = useState("");
   const [newShiftLabel, setNewShiftLabel] = useState("");
@@ -1507,7 +1505,6 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
     setCustomLabelInput("");
   };
 
-  // ✅ [신규] 새 커스텀 조 프리셋 등록
   const handleRegisterCustomShift = () => {
     const key = newShiftKey.trim().toUpperCase();
     const label = newShiftLabel.trim() || key;
@@ -1627,10 +1624,9 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 </button>
               </div>
 
-              {/* ✅ [신규] 커스텀 조 생성 폼 */}
               {customShiftOpen && (
                 <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 10, marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO, marginBottom: 6 }}>커스텀 조 만들기 (예: A1/C1)</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO, marginBottom: 6 }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
                   <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                     <input placeholder="조 코드 (예: A1C1)" value={newShiftKey} onChange={(e) => setNewShiftKey(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 12 }} />
                     <input placeholder="표시명 (예: A1/C1)" value={newShiftLabel} onChange={(e) => setNewShiftLabel(e.target.value)} style={{ flex: 1, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "6px 8px", fontSize: 12 }} />
@@ -1847,9 +1843,9 @@ function ReportView({ reportYear, reportMonth, changeReportMonth, isCurrentMonth
 
       <div style={{ fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 8 }}>{reportMonth + 1}월 출근 현황</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <MiniStatCard label="A조" value={ws.countA} color={SHIFT_INFO.A.color} />
-        <MiniStatCard label="C조" value={ws.countC} color={SHIFT_INFO.C.color} />
-        <MiniStatCard label="A/C조" value={ws.countFull} color={SHIFT_INFO.AC.color} />
+        <MiniStatCard label="A조" value={ws.countA} color={DEFAULT_SHIFT_INFO.A.color} />
+        <MiniStatCard label="C조" value={ws.countC} color={DEFAULT_SHIFT_INFO.C.color} />
+        <MiniStatCard label="A/C조" value={ws.countFull} color={DEFAULT_SHIFT_INFO.AC.color} />
       </div>
       <div style={{ fontSize: 12, color: MUTED, marginBottom: 16, marginTop: -8 }}>총 출근 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.workDays}일</span> · 총 근무 <span className="mono" style={{ fontWeight: 700, color: INK }}>{ws.totalGeun}근</span> <span style={{ color: "#C9BFA8" }}>(복합조는 2근으로 계산)</span></div>
 
@@ -1960,7 +1956,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (커스텀 조 및 라벨 관리 지원) ----------
+// ---------- Settings modal ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
@@ -2024,7 +2020,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 60 }} onClose={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,35,33,0.45)", display: "flex", justifyContent: "center", alignItems: "flex-end", zIndex: 60 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: CARD, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", borderRadius: "18px 18px 0 0", animation: "slideUp 0.22s ease-out" }}>
         <div style={{ padding: "16px 20px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>설정</div>
@@ -2033,7 +2029,6 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
-          {/* ✅ [신규] 커스텀 조 프리셋 관리 */}
           {Object.keys(customShifts).length > 0 && (
             <>
               <SectionTitle>커스텀 조(Shift) 프리셋 관리</SectionTitle>
