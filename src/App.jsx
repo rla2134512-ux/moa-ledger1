@@ -550,10 +550,6 @@ export default function App() {
   const deleteEntry = (dayNum, id) => mutateDay(dayNum, (d) => ({ ...d, entries: (d.entries || []).filter((e) => e.id !== id) }));
   const updateDayMeta = (dayNum, meta) => mutateDay(dayNum, (d) => ({ ...d, ...meta }));
 
-  // ✅ [사용자 맞춤형 정산/카운트 계산 로직]
-  // A계열 조(A, A1, A2 등) -> A조 횟수 (+1근)
-  // C계열 조(C 등) -> C조 횟수 (+1근)
-  // 복합조(AC, A1C, A2/C 등) 또는 하루 2개 이상 근무 -> A/C조(풀조) 횟수 (+2근)
   const computeMonthStats = (targetData) => {
     let gross = 0, expense = 0, asset = 0, countA = 0, countC = 0, countFull = 0;
     const workDaySet = new Set();
@@ -798,12 +794,13 @@ export default function App() {
         onTouchEnd={handleTouchEnd}
         style={{ width: "100%", maxWidth: 480, minHeight: "100vh", position: "relative", background: PAPER }}
       >
-        <div style={{ borderBottom: `1px solid ${PAPER_LINE}`, padding: "18px 20px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        {/* ✅ [개선사항 2] 톱니바퀴 및 상단 헤더 영역 수직 정렬 최적화 (선 기준 위쪽 여백 조화롭게 정돈) */}
+        <div style={{ borderBottom: `1px solid ${PAPER_LINE}`, padding: "16px 20px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div className="display" style={{ fontSize: 13, letterSpacing: 3, color: GOLD, fontWeight: 700 }}>MOA</div>
-            <div className="display" style={{ fontSize: 26, fontWeight: 700, marginTop: 2 }}>모으다</div>
+            <div className="display" style={{ fontSize: 12, letterSpacing: 3, color: GOLD, fontWeight: 700, lineHeight: 1 }}>MOA</div>
+            <div className="display" style={{ fontSize: 24, fontWeight: 700, marginTop: 4, lineHeight: 1.1 }}>모으다</div>
           </div>
-          <button onClick={() => setSettingsOpen(true)} style={{ padding: 8, marginTop: 4, background: "transparent", border: "none" }}><SettingsIcon size={20} color={INK} /></button>
+          <button onClick={() => setSettingsOpen(true)} style={{ padding: 6, display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: "pointer" }}><SettingsIcon size={20} color={INK} /></button>
         </div>
 
         <InstallBanner />
@@ -1138,7 +1135,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView ----------
+// ---------- CalendarView (개선사항 1: 달력 내부 글씨 굵기 및 가독성 대폭 강화) ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1198,19 +1195,20 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 4.5, height: 4.5, borderRadius: 4.5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
+              {/* ✅ [개선사항 1 반영] 글자 굵기를 두껍게(fontWeight 700~800) 주어 가독성을 대폭 향상 */}
               <div style={{ marginTop: 1, width: "100%", lineHeight: 1.15, overflow: "hidden" }}>
                 {conflict ? (
-                  <div style={{ fontSize: 9, fontWeight: 700, color: EXPENSE }}>⚠️ 중복출근</div>
+                  <div style={{ fontSize: 9, fontWeight: 800, color: EXPENSE }}>⚠️ 중복출근</div>
                 ) : work.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     {work.map((wItem, wIdx) => {
                       const sInfo = combinedShiftInfo[wItem.shift] || { label: wItem.shift, color: INK };
                       return (
                         <div key={wItem.id || wIdx} style={{ fontSize: 8.5, borderBottom: wIdx < work.length - 1 ? `1px dashed ${PAPER_LINE}` : "none", paddingBottom: 1.5, width: "100%" }}>
-                          <div style={{ fontWeight: 600, color: storeColor(wItem.category), fontSize: 8.5, wordBreak: "break-all", lineHeight: 1.1 }}>
+                          <div style={{ fontWeight: 700, color: storeColor(wItem.category), fontSize: 8.5, wordBreak: "break-all", lineHeight: 1.1 }}>
                             {wItem.category}
                           </div>
-                          <div className="mono" style={{ fontWeight: 700, color: sInfo?.color || INK, fontSize: 9, marginTop: 0.5 }}>
+                          <div className="mono" style={{ fontWeight: 800, color: sInfo?.color || INK, fontSize: 9, marginTop: 0.5 }}>
                             {sInfo?.label || wItem.shift}
                           </div>
                         </div>
@@ -1219,8 +1217,8 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                   </div>
                 ) : dayObj?.label ? (
                   <>
-                    <div style={{ fontSize: 9.5, fontWeight: 600, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
-                    {dayObj.memo && <div style={{ fontSize: 8.5, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
+                    <div style={{ fontSize: 9.5, fontWeight: 700, color: labelColorOf(dayObj.label, customLabels), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.label}</div>
+                    {dayObj.memo && <div style={{ fontSize: 8.5, fontWeight: 600, color: MUTED, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dayObj.memo}</div>}
                   </>
                 ) : null}
               </div>
@@ -1631,7 +1629,7 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 </button>
               </div>
 
-              {/* ✅ [완벽한 박스 크기 및 줄바꿈 교정] 모바일 화면(폭 480px)에서 가로로 절대 삐져나가지 않도록 수직 적층형 flex-col과 box-sizing 적용 */}
+              {/* ✅ [레이아웃 교정] 모바일 화면(폭 480px 이하)에서 가로로 절대 삐져나가지 않도록 수직 적층형 flex-col과 box-sizing 적용 */}
               {customShiftOpen && (
                 <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
@@ -1964,7 +1962,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (기본 조 및 커스텀 조 통합 삭제 관리 기능 완벽 연동) ----------
+// ---------- Settings modal ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
@@ -2010,7 +2008,6 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
     onPatch({ customLabels: next });
   };
 
-  // ✅ [핵심 기능 연동] 기본 조 및 커스텀 조 삭제 처리 함수
   const handleDeleteShift = (key, isCustom) => {
     if (isCustom) {
       const next = { ...customShifts };
@@ -2049,7 +2046,7 @@ function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRec
         <TornEdge color={CARD} />
 
         <div style={{ padding: "8px 20px 30px" }}>
-          {/* ✅ [신규] 설정 창 내 근무 조(Shift) 프리셋 관리 섹션 (기본 조 및 커스텀 조 모두 ✕ 버튼으로 삭제 가능) */}
+          {/* ✅ [근무 조 프리셋 관리 섹션] 기본 조와 커스텀 조 모두 ✕ 버튼으로 삭제 가능 */}
           <SectionTitle>근무 조(Shift) 프리셋 관리</SectionTitle>
           <div style={{ fontSize: 12, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>
             등록된 조 옆의 ✕ 버튼을 누르면 목록에서 삭제돼요.
