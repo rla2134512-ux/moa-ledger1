@@ -327,9 +327,9 @@ function downloadDataUrl(filename, dataUrl) {
 
 function TabButton({ active, onClick, icon: Icon, label }) {
   return (
-    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3.5" style={{ color: active ? INK : MUTED, border: "none", background: "transparent", cursor: "pointer" }}>
-      <Icon size={28} strokeWidth={active ? 2.6 : 2.0} />
-      <span style={{ fontSize: 14, fontWeight: active ? 800 : 600, letterSpacing: 0.3 }}>{label}</span>
+    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-1.5 py-3" style={{ color: active ? INK : MUTED, border: "none", background: "transparent", cursor: "pointer" }}>
+      <Icon size={26} strokeWidth={active ? 2.6 : 2.0} />
+      <span style={{ fontSize: 13, fontWeight: active ? 800 : 600, letterSpacing: 0.3 }}>{label}</span>
     </button>
   );
 }
@@ -794,11 +794,11 @@ export default function App() {
         onTouchEnd={handleTouchEnd}
         style={{ width: "100%", maxWidth: 480, minHeight: "100vh", position: "relative", background: PAPER }}
       >
-        {/* ✅ [개선사항 2 반영] 톱니바퀴 위치 및 상단 헤더 수직 정렬 최적화 (선 기준 위쪽 공간 조화롭게 배치) */}
-        <div style={{ borderBottom: `1px solid ${PAPER_LINE}`, padding: "14px 20px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        {/* ✅ [개선 완료] 상단 구분선 바로 위 라인에 톱니바퀴 및 헤더가 바짝 맞닿도록 최적화된 패딩 */}
+        <div style={{ borderBottom: `1px solid ${PAPER_LINE}`, padding: "12px 20px 8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div className="display" style={{ fontSize: 12, letterSpacing: 3, color: GOLD, fontWeight: 700, lineHeight: 1 }}>MOA</div>
-            <div className="display" style={{ fontSize: 24, fontWeight: 700, marginTop: 3, lineHeight: 1.1 }}>모으다</div>
+            <div className="display" style={{ fontSize: 11.5, letterSpacing: 3, color: GOLD, fontWeight: 700, lineHeight: 1 }}>MOA</div>
+            <div className="display" style={{ fontSize: 23, fontWeight: 700, marginTop: 2, lineHeight: 1.1 }}>모으다</div>
           </div>
           <button onClick={() => setSettingsOpen(true)} style={{ padding: 4, display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: "pointer" }}><SettingsIcon size={20} color={INK} /></button>
         </div>
@@ -849,8 +849,8 @@ export default function App() {
           </>
         )}
 
-        {/* ✅ [개선사항 2 반영] 하단 탭바 칸들을 아래 선 위로 정돈되게 최적화 */}
-        <div style={{ position: "sticky", bottom: 0, display: "flex", background: PAPER, borderTop: `1.5px solid ${PAPER_LINE}`, boxShadow: "0 -4px 20px rgba(0,0,0,0.06)", zIndex: 30, paddingBottom: 2 }}>
+        {/* ✅ [개선 완료] 하단 탭바를 아래쪽 네모박스 라인(선) 위에 바짝 밀착 */}
+        <div style={{ position: "sticky", bottom: 0, display: "flex", background: PAPER, borderTop: `1.5px solid ${PAPER_LINE}`, boxShadow: "0 -4px 20px rgba(0,0,0,0.06)", zIndex: 30, paddingBottom: 0 }}>
           <TabButton active={tab === "calendar"} onClick={() => setTab("calendar")} icon={Calendar} label="캘린더" />
           <TabButton active={tab === "daily"} onClick={() => setTab("daily")} icon={ListTodo} label="오늘 플래너" />
           <TabButton active={tab === "report"} onClick={() => setTab("report")} icon={Gauge} label="정산" />
@@ -1136,7 +1136,7 @@ function InstallBanner() {
   );
 }
 
-// ---------- CalendarView (개선사항 1: 달력 내부 글씨 굵기 및 가독성 대폭 강화) ----------
+// ---------- CalendarView ----------
 function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveWallpaper, onCopyOffDays, onOpenImportModal, customLabels = [], customShifts = {} }) {
   const dim = daysInMonth(year, month);
   const fw = firstWeekday(year, month);
@@ -1196,7 +1196,6 @@ function CalendarView({ year, month, changeMonth, daysData, onSelectDay, onSaveW
                 {dayObj?.label && <span style={{ width: 4.5, height: 4.5, borderRadius: 4.5, background: labelColorOf(dayObj.label, customLabels), flexShrink: 0 }} />}
               </div>
 
-              {/* ✅ [개선사항 1 반영] 달력 내부 글씨 굵기를 선명하게 강화 */}
               <div style={{ marginTop: 1, width: "100%", lineHeight: 1.15, overflow: "hidden" }}>
                 {conflict ? (
                   <div style={{ fontSize: 9, fontWeight: 800, color: EXPENSE }}>⚠️ 중복출근</div>
@@ -1630,7 +1629,6 @@ function DayModal({ year, month, day, dayObj, settings, onClose, onAdd, onDelete
                 </button>
               </div>
 
-              {/* ✅ [모바일 박스 넘침 완전 차단] 폭 100% 및 box-sizing 철저 보장 */}
               {customShiftOpen && (
                 <div style={{ background: "#FFF", border: `1px solid ${INDIGO}`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: INDIGO }}>커스텀 조 만들기 (예: A1/C1 등 시간 포함)</div>
@@ -1963,7 +1961,7 @@ function AnalysisView({ monthTotals, monthlySeries = [], yearTotals, year, yearS
   );
 }
 
-// ---------- Settings modal (기본 조 및 커스텀 조 통합 삭제 관리 기능 지원) ----------
+// ---------- Settings modal ----------
 function SettingsModal({ settings, onClose, onPatch, onAddRecurring, onToggleRecurring, onDeleteRecurring, onDeleteStorePreset, onResetStorePresets, onExportBackup, onImportBackup, onExportCSV }) {
   const fileRef = useRef(null);
   const [rOne, setROne] = useState(settings.fixedRates?.one || ONE_SHIFT);
